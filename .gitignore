@@ -1,0 +1,8 @@
+.vscode
+*.ipynb
+*.pyc
+*.swp
+tmp/*
+backup/*
+mkdocs/site
+mkdocs/site/*
