@@ -68,30 +68,38 @@ import sys
 import argparse
 import logging
 import pandas as pd
-from sqlalchemy import text, select, insert, update
+from sqlalchemy import text
 from openpyxl import load_workbook
 import functions as f
 import data as d
 
 
 # Define the required worksheets and associated database tables
-requiredSheets = {
-    'mapping types': 'mapping_types',
-    'general ledger mapping': 'general_ledger_mapping',
-    'department grouping': 'department_grouping',
-    'cost type grouping': 'cost_type_grouping',
-    'department cost type grouping': 'department_cost_type_grouping',
-    'event class codes': 'event_class_codes',
-    'event cost type codes': 'event_cost_type_codes',
-    'event cost sub type codes': 'event_cost_sub_type_codes',
-    'event source codes': 'event_source_codes',
-    'event codes': 'event_codes',
-    'event attribute codes': 'event_attribute_codes',
-    'general ledger attribute codes': 'general_ledger_attribute_codes',
-    'general ledger attributes': 'general_ledger_attributes',
-    'general ledger disbursement': 'general_ledger_disbursement',
-    'general ledger distribution': 'general_ledger_distribution'
-}
+requiredSheets = [
+    {
+        'event type codes': 'event_type_codes',
+        'event source codes': 'event_source_codes',
+    }, {
+         'mapping types': 'mapping_types',
+        'event class codes': 'event_class_codes',
+        'event attribute codes': 'event_attribute_codes',
+        'event subroutines': 'event_subroutines',
+        'ward attributes': 'ward_attributes',
+        'clinic attributes': 'clinic_attributes',
+        'general ledger attribute codes': 'general_ledger_attribute_codes',
+        'distribution codes': 'distribution_codes'
+    }, {
+       'general ledger mapping': 'general_ledger_mapping',
+        'department grouping': 'department_grouping',
+        'cost type grouping': 'cost_type_grouping',
+        'department cost type grouping': 'department_cost_type_grouping',
+        'event codes': 'event_codes',
+        'event attributes': 'event_attributes',
+        'general ledger attributes': 'general_ledger_attributes',
+        'general ledger disbursement': 'general_ledger_disbursement',
+        'general ledger distribution': 'general_ledger_distribution'
+    }
+]
 
 if __name__ == '__main__':
     '''
@@ -132,6 +140,7 @@ if __name__ == '__main__':
 
     # Set up logging
     f.setupLogging(progName, logDir, logFile, loggingLevel)
+    logging.debug('Logging set up')
 
     # Read in the configuration file - which must exist if required - and create the database engine
     f.createEngine(configDir, configFile, DatabaseType, server, username, password, databaseName)
@@ -144,12 +153,12 @@ if __name__ == '__main__':
 
     # Get the hospital_code from the worksheet
     ws = wb['hospital']
-    hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
+    d.hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
 
     # Check if this is hospital code exists in the database
-    selected = pd.read_sql_query(text('SELECT hospital_code FROM hospitals'), d.engine.connect())
-    hospitals = selected.values.tolist()      # convert rows/columns to a list of lists (will be [[hospital_code]] )
-    haveHospital = [hospital_code] in hospitals
+    hospitals_df = pd.read_sql_query(text('SELECT hospital_code FROM hospitals'), d.engine.connect())
+    hospitals = hospitals_df.values.tolist()      # convert rows/columns to a list of lists (will be [[hospital_code]] )
+    haveHospital = [d.hospital_code] in hospitals
     if not haveHospital:
         logging.critical('No hospital_code %s exists in the Clinical Costing database')
         logging.critical('Must load the hospital departments and cost types before you can model the hospitals costs')
@@ -161,81 +170,62 @@ if __name__ == '__main__':
 
     # Get the model_code from the worksheet
     ws = wb['model']
-    model_code = ws['A2'].value        # First (and only) model_code in the list
+    d.model_code = ws['A2'].value        # First (and only) model_code in the list
 
     # Check if this is a new model code, or upgraded configuration of an existing model
-    selected = pd.read_sql_query(text('SELECT model_code FROM models'), d.engine.connect())
-    models = selected.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
-    newModel = not [model_code] in models
-
-    # Check the required configuration data worksheets
-    sheet_table_df = {}
-    for sheet, table in requiredSheets.items():
-        sheet_table_df[sheet] = f.checkWorksheet(wb, sheet, table, ['hospital_code', 'model_code'])
+    models_df = pd.read_sql_query(text('SELECT model_code FROM models'), d.engine.connect())
+    models = models_df.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
+    newModel = not [d.model_code] in models
 
     # If this is a new model, then add it to the table
     if newModel:
         table_df = table_df.truncate(after=0)       # We only want the first row
         table_df.to_sql('models', d.engine, if_exists='append', index=False)
 
-    # Load the model configurations
-    for sheet, table in requiredSheets.items():
-        table_df = sheet_table_df[sheet]
+    # Add the first set of configuation data to the database
+    theseSheets = requiredSheets[0]
+    for sheet, table in theseSheets.items():
+        # Check the worksheet
+        table_df = f.checkWorksheet(wb, sheet, table, ['hospital_code', 'model_code'])
 
-        # Prepend the hospital code and the model code
-        table_df.insert(0,'hospital_code', hospital_code)
-        table_df.insert(0,'model_code', model_code)
+        # Prepend the hospital code
+        table_df.insert(0,'hospital_code', d.hospital_code)
+        table_df.insert(1,'model_code', d.model_code)
 
-        # For a new model, just append the data
-        if  newModel:
-            # Append the new data to the table
-            table_df.to_sql(table, d.engine, if_exists='append', index=False)
-        else:   # Process each row of the spreadsheet, doing an update or an append
-                # [Deletes are not supported as they could break the referrential integrety of exising data]
-            # Collect all the indexed columns - assume that there are foreign keys associated with these
-            indexedColumns = []
-            for index in d.metadata.tables[table].indexes:
-                for col in index.columns:
-                    if col.name not in indexedColumns:
-                        indexedColumns.append(col.name)
-            # Process each row
-            for row in table_df.itertuples(index=False):
-                where = ''
-                results = []
-                # Build a where clause, based on the values of the primary key and indexed columns
-                for col in indexedColumns:
-                    if where != '':
-                        where += ' AND '
-                    where += col + ' = "' + getattr(row, col) + '"'
-                for col in d.metadata.tables[table].primary_key.columns:
-                    colName = col.name
-                    if colName in indexedColumns:
-                        continue
-                    if where != '':
-                        where += ' AND '
-                    value = getattr(row, colName)
-                    if isinstance(value, int) or isinstance(value, float):
-                        where += colName + ' = ' + str(value)
-                    elif isinstance(value, str):
-                        where += colName + ' = "' + value + '"'
-                    else:
-                        where += colName + ' = "' + str(value) + '"'
-                with d.Session() as session:
-                    results = session.scalars(select(d.metadata.tables[table]).where(text(where))).all()
-                # Assemble the parameters (values to be updated, or inserted)
-                params = {}
-                for col in d.metadata.tables[table].columns:
-                    colName = col.name
-                    if (len(results) > 0) and (colName in indexedColumns):
-                        continue
-                    params[colName] = getattr(row, colName)
-                with d.Session() as session:
-                    if (len(results) > 0):      # A row exists
-                        if (len(params) > 0):       # Which has updatable columns (not part of primary key or foreign key)
-                            logging.debug('Existing model update: updating table %s, with values %s, where %s', table, params, where)
-                            session.execute(update(d.metadata.tables[table]).values(params).where(text(where)))
-                            session.commit()
-                    else:
-                        logging.debug('New model: inserting into table %s value %s', table, params)
-                        session.execute(insert(d.metadata.tables[table]).values(params))
-                        session.commit()
+        # Add the data to the database
+        f.addTableData(table_df, table)
+ 
+    # Now use the hospital's feeder configuration data
+    # to add codes to event_class_codes, event_attribute_code, distribution_codes and event_codes
+    feeders_df = pd.read_sql_query(text('SELECT * FROM feeders WHERE hospital_code = "' + d.hospital_code + '"'), d.engine.connect())
+    feeders_df = feeders_df[feeders_df['feeder_type_code'] == 'C']
+    event_class_codes_df = feeders_df[['hospital_code', 'event_class_code', 'event_class_seq', 'feeder_description']]
+    event_class_codes_df = event_class_codes_df.rename(columns={'feeder_description': 'event_class_description'})
+    event_class_codes_df.insert(1, 'model_code', d.model_code)
+    f.addTableData(event_class_codes_df, 'event_class_codes')
+    event_codes_df = feeders_df[['hospital_code', 'feeder_code', 'feeder_description']]
+    event_codes_df = event_codes_df.rename(columns={'feeder_code': 'event_attribute_code', 'feeder_description': 'event_attribute_description'})
+    event_codes_df.insert(1, 'model_code', d.model_code)
+    f.addTableData(event_codes_df, 'event_attribute_codes')
+    event_codes_df = event_codes_df.rename(columns={'event_attribute_code': 'distribution_code', 'event_attribute_description': 'distribution_description'})
+    f.addTableData(event_codes_df, 'distribution_codes')
+    event_codes_df = feeders_df[['hospital_code', 'feeder_code', 'event_class_code', 'feeder_description']]
+    event_codes_df = event_codes_df.rename(columns={'feeder_code': 'event_code', 'feeder_description': 'event_description'})
+    event_codes_df.insert(1, 'model_code', d.model_code)
+    event_codes_df.insert(2,'event_type_code', 'other')
+    event_codes_df.insert(4,'event_source_code', 'Invoice')
+    f.addTableData(event_codes_df, 'event_codes')
+
+    # Add the remaining configuation data to the database
+    for theseSheets in requiredSheets[1:]:
+        for sheet, table in theseSheets.items():
+            # Check the worksheet
+            table_df = f.checkWorksheet(wb, sheet, table, ['hospital_code', 'model_code'])
+
+            # Prepend the hospital code
+            table_df.insert(0,'hospital_code', d.hospital_code)
+            table_df.insert(1,'model_code', d.model_code)
+
+            # Add the data to the database
+            f.addTableData(table_df, table)
+

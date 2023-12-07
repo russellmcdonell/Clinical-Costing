@@ -30,3 +30,6 @@ codeTables = {}     # A dictionary of all the codesets. key=table name, value=se
 engine = None       # The database engine
 metadata = None     # The database metadata
 Session = None      # The database session maker
+hospital_code = None    # The code for this hospital
+model_code = None       # The code for this clinical costing model
+run_code = None         # The code for this clinical costing run

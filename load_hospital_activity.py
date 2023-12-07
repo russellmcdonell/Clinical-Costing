@@ -140,13 +140,13 @@ if __name__ == '__main__':
 
     # Get the hospital_code from the 'hospital' worksheet
     ws = wb['hospital']
-    hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
+    d.hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
 
     # Check if this is a new hospital code, or upgraded configuration of an existing hospital
     hospitals_df = pd.read_sql_query(text('SELECT hospital_code FROM hospitals'), d.engine.connect())
     hospitals = hospitals_df.values.tolist()      # convert rows/columns to a list of lists (will be [[hospital_code]] )
-    if not [hospital_code] in hospitals:
-        logging.critical('hospital (%s) no in table "hospitals"', hospital_code)
+    if not [d.hospital_code] in hospitals:
+        logging.critical('hospital (%s) no in table "hospitals"', d.hospital_code)
         logging.shutdown()
         sys.exit(d.EX_CONFIG)
 
@@ -155,22 +155,22 @@ if __name__ == '__main__':
 
     # Get the run_code from the 'run' worksheet
     ws = wb['run']
-    run_code = ws['A2'].value        # First (and only) run_code in the list
+    d.run_code = ws['A2'].value        # First (and only) run_code in the list
 
     # Check if this is a run_code exists
     runs_df = pd.read_sql_query(text('SELECT run_code FROM clinical_costing_runs'), d.engine.connect())
     runs = runs_df.values.tolist()      # convert rows/columns to a list of lists (will be [[run_code]] )
-    newRun = not [run_code] in runs
+    newRun = not [d.run_code] in runs
 
     # If this is a new run_code then add it to the table
     table_df = table_df.truncate(after=0)       # We only want the first row
     if newRun:
         # Prepend the hospital code and create a new run record
-        table_df.insert(0,'hospital_code', hospital_code)
+        table_df.insert(0,'hospital_code', d.hospital_code)
         table_df.to_sql('clinical_costing_runs', d.engine, if_exists='append', index=False)
     else:       # Check that this is the same run
         runs_df = pd.read_sql_query(text('SELECT * FROM clinical_costing_runs'), d.engine.connect())
-        thisRun_df = runs_df[runs_df['run_code'] == run_code]
+        thisRun_df = runs_df[runs_df['run_code'] == d.run_code]
         run_description = ws['B2'].value
         start_date = ws['C2'].value
         if isinstance(start_date, datetime.datetime):
@@ -192,7 +192,7 @@ if __name__ == '__main__':
             sys.exit(d.EX_CONFIG)
 
     # Create the general "where" clause
-    where = 'hospital_code = "' + hospital_code + '" AND run_code = "' + run_code + '"'
+    where = 'hospital_code = "' + d.hospital_code + '" AND run_code = "' + d.run_code + '"'
 
     # Check that the required configuration data worksheets
     sheet_table_df = {}
@@ -211,8 +211,8 @@ if __name__ == '__main__':
         table_df = sheet_table_df[sheet]
 
         # Prepend the hospital_code and run code
-        table_df.insert(0,'hospital_code', hospital_code)
-        table_df.insert(1,'run_code', run_code)
+        table_df.insert(0,'hospital_code', d.hospital_code)
+        table_df.insert(1,'run_code', d.run_code)
 
         # Append the data to the itemized_costs table
-        table_df.to_sql(table, d.engine, if_exists='append', index=False)
+        f.addTableData(table_df, table)

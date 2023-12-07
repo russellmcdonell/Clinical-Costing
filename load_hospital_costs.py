@@ -128,13 +128,13 @@ if __name__ == '__main__':
 
     # Get the hospital_code from the 'hospital' worksheet
     ws = wb['hospital']
-    hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
+    d.hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
 
     # Check if this is a new hospital code, or upgraded configuration of an existing hospital
     hospitals_df = pd.read_sql_query(text('SELECT hospital_code FROM hospitals'), d.engine.connect())
     hospitals = hospitals_df.values.tolist()      # convert rows/columns to a list of lists (will be [[hospital_code]] )
-    if not [hospital_code] in hospitals:
-        logging.critical('hospital (%s) no in table "hospitals"', hospital_code)
+    if not [d.hospital_code] in hospitals:
+        logging.critical('hospital (%s) no in table "hospitals"', d.hospital_code)
         logging.shutdown()
         sys.exit(d.EX_CONFIG)
 
@@ -143,10 +143,10 @@ if __name__ == '__main__':
 
     # Get the run_code from the 'run' worksheet
     ws = wb['run']
-    run_code = ws['A2'].value        # First (and only) run_code in the list
+    d.run_code = ws['A2'].value        # First (and only) run_code in the list
 
     # Create the general "where" clause
-    where = 'hospital_code = "' + hospital_code + '" AND run_code = "' + run_code + '"'
+    where = 'hospital_code = "' + d.hospital_code + '" AND run_code = "' + d.run_code + '"'
 
     # Check that we have an 'itemized costs' worksheet
     if 'itemized costs' not in wb:
@@ -163,9 +163,13 @@ if __name__ == '__main__':
         logging.critical('Missing "worksheet name" heading in "itemized costs" worksheet')
         logging.shutdown()
         sys.exit(d.EX_CONFIG)
+    if 'feeder_code' not in itemized_costs_df.columns:
+        logging.critical('Missing "feeder_code" heading in "itemized costs" worksheet')
+        logging.shutdown()
+        sys.exit(d.EX_CONFIG)
     sheet_table_df = {}
     for sheet in itemized_costs_df['worksheet name']:
-        sheet_table_df[sheet] = f.checkWorksheet(wb, sheet, 'itemized_costs', ['hospital_code', 'run_code'])
+        sheet_table_df[sheet] = f.checkWorksheet(wb, sheet, 'itemized_costs', ['hospital_code', 'run_code', 'feeder_code'])
         # Now check that the episode numbers are valid
         for row in sheet_table_df[sheet].itertuples(index=False):
             service_code = getattr(row, 'service_code')
@@ -202,7 +206,7 @@ if __name__ == '__main__':
     # Check if this is a run_code exists
     runs_df = pd.read_sql_query(text('SELECT run_code FROM clinical_costing_runs'), d.engine.connect())
     runs = runs_df.values.tolist()      # convert rows/columns to a list of lists (will be [[run_code]] )
-    newRun = not [run_code] in runs
+    newRun = not [d.run_code] in runs
 
     # Check the 'general ledger costs' worksheet
     general_ledger_table_df = f.checkWorksheet(wb, 'general ledger costs', 'general_ledger_costs', ['hospital_code', 'run_code'])
@@ -211,11 +215,11 @@ if __name__ == '__main__':
     run_df = run_df.truncate(after=0)       # We only want the first row
     if newRun:
         # Prepend the hospital code and create a new run record
-        run_df.insert(0,'hospital_code', hospital_code)
+        run_df.insert(0,'hospital_code', d.hospital_code)
         run_df.to_sql('clinical_costing_runs', d.engine, if_exists='append', index=False)
     else:       # Check that this is the same run
         runs_df = pd.read_sql_query(text('SELECT * FROM clinical_costing_runs'), d.engine.connect())
-        thisRun_df = runs_df[runs_df['run_code'] == run_code]
+        thisRun_df = runs_df[runs_df['run_code'] == d.run_code]
         ws = wb['run']
         run_description = ws['B2'].value
         start_date = ws['C2'].value
@@ -247,27 +251,30 @@ if __name__ == '__main__':
             logging.debug('general_ledger_costs, itemized_costs and event charges cleared')
 
     # Prepend the hospital_code and run code to the general ledger extract
-    general_ledger_table_df.insert(0,'hospital_code', hospital_code)
-    general_ledger_table_df.insert(1,'run_code', run_code)
+    general_ledger_table_df.insert(0,'hospital_code', d.hospital_code)
+    general_ledger_table_df.insert(1,'run_code', d.run_code)
 
     # Append the data to the general_ledger_costs table
-    general_ledger_table_df.to_sql('general_ledger_costs', d.engine, if_exists='append', index=False)
+    f.addTableData(general_ledger_table_df, 'general_ledger_costs')
 
     # Add the itemized costs
-    for sheet in itemized_costs_df['worksheet name']:
+    for index, row in itemized_costs_df.iterrows():
+        sheet = row['worksheet name']
+        feeder_code = row['feeder_code']
         table_df = sheet_table_df[sheet]
 
-        # Prepend the hospital_code and run code
-        table_df.insert(0,'hospital_code', hospital_code)
-        table_df.insert(1,'run_code', run_code)
+        # Prepend the hospital_code, run code and feeder_code
+        table_df.insert(0,'hospital_code', d.hospital_code)
+        table_df.insert(1,'run_code', d.run_code)
+        table_df.insert(2,'feeder_code', feeder_code)
 
         # Append the data to the itemized_costs table
-        table_df.to_sql('itemized_costs', d.engine, if_exists='append', index=False)
+        f.addTableData(table_df, 'itemized_costs')
 
     # Add any general ledger run adjustments
     # Prepend the hospital_code and run code
-    adjustments_df.insert(0,'hospital_code', hospital_code)
-    adjustments_df.insert(1,'run_code', run_code)
+    adjustments_df.insert(0,'hospital_code', d.hospital_code)
+    adjustments_df.insert(1,'run_code', d.run_code)
 
     # Append the data to the general_ledger_run_adjustments table
-    adjustments_df.to_sql('general_ledger_run_adjustments', d.engine, if_exists='append', index=False)
+    f.addTableData(adjustments_df, 'general_ledger_run_adjustments')

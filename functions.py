@@ -2,15 +2,16 @@
 The common functions for the Clinical Costing system.
 '''
 
-# pylint: disable=invalid-name, line-too-long, broad-exception-caught, unused-variable
+# pylint: disable=invalid-name, line-too-long, broad-exception-caught, unused-variable, superfluous-parens
 
 import os
 import sys
 import logging
 import collections
 import json
+import decimal
 import pandas as pd
-from sqlalchemy import create_engine, MetaData, text
+from sqlalchemy import create_engine, MetaData, text, select, insert, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from sqlalchemy_utils import database_exists
@@ -193,15 +194,18 @@ def checkWorksheet(wb, sheet, table, toBeAdded):
                 break
             if not isinstance(cell.value, colType):
                 failed = True
-                if isinstance(cell.value, int) and (colType == float):
+                if isinstance(cell.value, int) and ((colType == float) or (colType == decimal.Decimal)):
                     failed = False
-                elif isinstance(cell.value, float) and (colType == int):
-                    try:
-                        x = int(cell.value)
-                        if x == cell.value:
-                            failed = False
-                    except Exception as e:
-                        pass
+                elif isinstance(cell.value, float):
+                    if (colType == decimal.Decimal):
+                        failed = False
+                    elif (colType == int):
+                        try:
+                            x = int(cell.value)
+                            if x == cell.value:
+                                failed = False
+                        except Exception as e:
+                            pass
                 if failed:
                     logging.critical('Invalid data "%s" (type %s not %s) in column "%s" in worksheet "%s" at "%s"',
                                     cell.value, type(cell.value), colType, colName, sheet, cell.coordinate)
@@ -243,3 +247,70 @@ def checkWorksheet(wb, sheet, table, toBeAdded):
                 logging.shutdown()
                 sys.exit(d.EX_DATAERR)
     return table_df
+
+def addTableData(dfTable, thisTable):
+    '''
+    Add data from a dataframe to a database table
+    '''
+
+    # Process each row of the spreadsheet, doing an update or an append
+    # [Deletes are not supported as they could break the referrential integrety of exising data]
+    # Collect all the indexed columns - assume that there are foreign keys associated with these
+    indexedColumns = []
+    for index in d.metadata.tables[thisTable].indexes:
+        for col in index.columns:
+            if col.name in indexedColumns:
+                continue
+            indexedColumns.append(col.name)
+    # Process each row
+    for row in dfTable.itertuples(index=False):
+        where = ''
+        results = []
+        # Build a where clause, based on the values of the primary key and indexed columns
+        foundCols = set()
+        for col in indexedColumns:
+            foundCols.add(col)
+            if where != '':
+                where += ' AND '
+            where += col + ' = "' + getattr(row, col) + '"'
+        for col in d.metadata.tables[thisTable].primary_key.columns:
+            colName = col.name
+            if colName in indexedColumns:
+                continue
+            if colName in foundCols:
+                continue
+            foundCols.add(colName)
+            if where != '':
+                where += ' AND '
+            value = getattr(row, colName)
+            if isinstance(value, int) or isinstance(value, float):
+                where += colName + ' = ' + str(value)
+            elif isinstance(value, str):
+                where += colName + ' = "' + value + '"'
+            else:
+                where += colName + ' = "' + str(value) + '"'
+        with d.Session() as session:
+            results = session.scalars(select(d.metadata.tables[thisTable]).where(text(where))).all()
+        logging.debug("table(%s), where(%s), results(%s)", thisTable, where, results)
+
+        # Assemble the parameters (values to be updated, or inserted)
+        params = {}
+        for col in d.metadata.tables[thisTable].columns:
+            colName = col.name
+            if (len(results) > 0) and (colName in indexedColumns):
+                continue
+            param = getattr(row, colName)
+            if type(param) not in [int, float, str, decimal.Decimal]:
+                param = str(param)
+            params[colName] = param
+        with d.Session() as session:
+            if (len(results) > 0):      # A row exists
+                if (len(params) > 0):       # Which has updatable columns (not part of primary key or foreign key)
+                    logging.debug('Existing row update: updating table %s, with values %s, where %s', thisTable, params, where)
+                    session.execute(update(d.metadata.tables[thisTable]).values(params).where(text(where)))
+                    session.commit()
+            else:
+                logging.debug('New row: inserting into table %s value %s', thisTable, params)
+                session.execute(insert(d.metadata.tables[thisTable]).values(params))
+                session.commit()
+    return

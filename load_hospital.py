@@ -68,22 +68,28 @@ import sys
 import argparse
 import logging
 import pandas as pd
-from sqlalchemy import text, select, update, insert
+from sqlalchemy import text
 from openpyxl import load_workbook
 import functions as f
 import data as d
 
 
 # Define the required worksheets and associated database tables
-requiredSheets = {
-    'departments': 'departments',
-    'cost types': 'cost_types',
-    'services': 'services',
-    'wards': 'wards',
-    'theatres': 'theatres',
-    'clinics': 'clinics',
-    'clinicians': 'clinicians'
-}
+requiredSheets = [
+    {
+        'feeder types': 'feeder_types'
+    }, {
+        'departments': 'departments',
+        'cost types': 'cost_types',
+        'services': 'services',
+        'wards': 'wards',
+        'theatres': 'theatres',
+        'clinics': 'clinics',
+        'clinicians': 'clinicians',
+        'feeders': 'feeders'
+    }
+]
+
 
 if __name__ == '__main__':
     '''
@@ -124,6 +130,7 @@ if __name__ == '__main__':
 
     # Set up logging
     f.setupLogging(progName, logDir, logFile, loggingLevel)
+    logging.debug('Logging set up')
 
     # Read in the configuration file - which must exist if required - and create the database engine
     f.createEngine(configDir, configFile, DatabaseType, server, username, password, databaseName)
@@ -136,17 +143,12 @@ if __name__ == '__main__':
 
     # Get the hospital_code from the worksheet
     ws = wb['hospital']
-    hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
+    d.hospital_code = ws['A2'].value        # First (and only) hospital_code in the list
 
     # Check if this is a new hospital code, or upgraded configuration of an existing hospital
     hospitals_df = pd.read_sql_query(text('SELECT hospital_code FROM hospitals'), d.engine.connect())
     hospitals = hospitals_df.values.tolist()      # convert rows/columns to a list of lists (will be [[hospital_code]] )
-    newHospital = not [hospital_code] in hospitals
-
-    # Check the required configuration data worksheets
-    sheet_tables_df = {}
-    for sheet, table in requiredSheets.items():
-        sheet_tables_df[sheet] = f.checkWorksheet(wb, sheet, table, ['hospital_code'])
+    newHospital = not [d.hospital_code] in hospitals
 
     # If this is a new hospital, then add it to the table
     if newHospital:
@@ -154,61 +156,13 @@ if __name__ == '__main__':
         table_df.to_sql('hospitals', d.engine, if_exists='append', index=False)
 
     # Add this configuation data to the database
-    for sheet, table in requiredSheets.items():
-        table_df = sheet_tables_df[sheet]
+    for theseSheets in requiredSheets:
+        for sheet, table in theseSheets.items():
+            # Check the worksheet
+            table_df = f.checkWorksheet(wb, sheet, table, ['hospital_code'])
 
-        # Prepend the hospital code
-        table_df.insert(0,'hospital_code', hospital_code)
+            # Prepend the hospital code
+            table_df.insert(0,'hospital_code', d.hospital_code)
 
-        # For a new hospital, just append the data
-        if  newHospital:
-            # Append the new data to the table
-            table_df.to_sql(table, d.engine, if_exists='append', index=False)
-        else:   # Process each row of the spreadsheet, doing an update or an append
-                # [Deletes are not supported as they could break the referrential integrety of exising data]
-            # Collect all the indexed columns - assume that there are foreign keys associated with these
-            indexedColumns = []
-            for index in d.metadata.tables[table].indexes:
-                for col in index.columns:
-                    indexedColumns.append(col.name)
-            # Process each row
-            for row in table_df.itertuples(index=False):
-                where = ''
-                results = []
-                # Build a where clause, based on the values of the primary key and indexed columns
-                for col in indexedColumns:
-                    if where != '':
-                        where += ' AND '
-                    where += col + ' = "' + getattr(row, col) + '"'
-                for col in d.metadata.tables[table].primary_key.columns:
-                    colName = col.name
-                    if colName in indexedColumns:
-                        continue
-                    if where != '':
-                        where += ' AND '
-                    value = getattr(row, colName)
-                    if isinstance(value, int) or isinstance(value, float):
-                        where += colName + ' = ' + str(value)
-                    elif isinstance(value, str):
-                        where += colName + ' = "' + value + '"'
-                    else:
-                        where += colName + ' = "' + str(value) + '"'
-                with d.Session() as session:
-                    results = session.scalars(select(d.metadata.tables[table]).where(text(where))).all()
-                # Assemble the parameters (values to be updated, or inserted)
-                params = {}
-                for col in d.metadata.tables[table].columns:
-                    colName = col.name
-                    if (len(results) > 0) and (colName in indexedColumns):
-                        continue
-                    params[colName] = getattr(row, colName)
-                with d.Session() as session:
-                    if (len(results) > 0):      # A row exists
-                        if (len(params) > 0):       # Which has updatable columns (not part of primary key or foreign key)
-                            logging.debug('Existing hospital update: updating table %s, with values %s, where %s', table, params, where)
-                            session.execute(update(d.metadata.tables[table]).values(params).where(text(where)))
-                            session.commit()
-                    else:
-                        logging.debug('New hospital: inserting into table %s value %s', table, params)
-                        session.execute(insert(d.metadata.tables[table]).values(params))
-                        session.commit()
+            # Add the data to the database
+            f.addTableData(table_df, table)
