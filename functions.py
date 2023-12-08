@@ -302,6 +302,7 @@ def addTableData(dfTable, thisTable):
             param = getattr(row, colName)
             if type(param) not in [int, float, str, decimal.Decimal]:
                 param = str(param)
+            print(param, type(param))
             params[colName] = param
         with d.Session() as session:
             if (len(results) > 0):      # A row exists
@@ -314,3 +315,37 @@ def addTableData(dfTable, thisTable):
                 session.execute(insert(d.metadata.tables[thisTable]).values(params))
                 session.commit()
     return
+
+def moveCosts(fromDeptCode, fromCostType, toAmount, toDeptCode, toCostType, mappingCode, dfCosts):
+    '''
+    Move a cost from one account to another
+    '''
+    dfFromCost = dfCosts[(dfCosts['department_code'] == fromDeptCode) & (dfCosts['cost_type_code'] == fromCostType)]
+    dfToCost = dfCosts[(dfCosts['department_code'] == toDeptCode) & (dfCosts['cost_type_code'] == toCostType)]
+    if len(dfFromCost.index) > 0:       # Has to be something to move
+        oldFromAmount = dfFromCost['cost'].iloc[0]
+        if mappingCode == 'F':        # This is a fractional cost (thisAmount is actually a fraction, not a cost)
+            toAmount = oldFromAmount * toAmount
+
+        #Check to see if this  requires a new thisRow
+        if len(dfToCost.index) == 0:
+            newRow = {'hospital_code': d.hospital_code, 'run_code': d.run_code, 'model_code': d.model_code, 'department_code': toDeptCode, 'cost_type_code': toCostType, 'cost': toAmount}
+            dfCosts = pd.concat([dfCosts, pd.DataFrame(newRow, index=[0])], ignore_index=True)
+        else:
+            dfCosts.loc[(dfCosts.department_code == toDeptCode) & (dfCosts.cost_type_code == toCostType), 'cost'] += toAmount
+        dfCosts.loc[(dfCosts.department_code == fromDeptCode) & (dfCosts.cost_type_code == fromCostType), 'cost'] -= toAmount
+    return dfCosts
+
+def generalLedgerAdjustOrMap(adjustMap_df, costs_df):
+    '''
+    Execute any adjustments or mappings
+    '''
+    for thisRow in adjustMap_df.itertuples(index=False):
+        thisFromDeptCode = thisRow.from_department_code
+        thisFromCostType = thisRow.from_cost_type_code
+        thisMappingCode = thisRow.mapping_type_code
+        thisAmount = thisRow.amount
+        thisToDeptCode = thisRow.to_department_code
+        thisToCostType = thisRow.to_cost_type_code
+        moveCosts(thisFromDeptCode, thisFromCostType, thisAmount, thisToDeptCode, thisToCostType, thisMappingCode, costs_df)
+    return costs_df

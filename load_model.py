@@ -81,6 +81,7 @@ requiredSheets = [
         'event source codes': 'event_source_codes',
     }, {
          'mapping types': 'mapping_types',
+         'feeder model': 'feeder_model',
         'event class codes': 'event_class_codes',
         'event attribute codes': 'event_attribute_codes',
         'event subroutines': 'event_subroutines',
@@ -194,7 +195,7 @@ if __name__ == '__main__':
 
         # Add the data to the database
         f.addTableData(table_df, table)
- 
+
     # Now use the hospital's feeder configuration data
     # to add codes to event_class_codes, event_attribute_code, distribution_codes and event_codes
     feeders_df = pd.read_sql_query(text('SELECT * FROM feeders WHERE hospital_code = "' + d.hospital_code + '"'), d.engine.connect())
@@ -228,4 +229,3 @@ if __name__ == '__main__':
 
             # Add the data to the database
             f.addTableData(table_df, table)
-

@@ -159,8 +159,8 @@ if __name__ == '__main__':
     data = ws.values
     cols = next(data)
     itemized_costs_df = pd.DataFrame(list(data), columns=cols)
-    if 'worksheet name' not in itemized_costs_df.columns:
-        logging.critical('Missing "worksheet name" heading in "itemized costs" worksheet')
+    if 'worksheet' not in itemized_costs_df.columns:
+        logging.critical('Missing "worksheet" heading in "itemized costs" worksheet')
         logging.shutdown()
         sys.exit(d.EX_CONFIG)
     if 'feeder_code' not in itemized_costs_df.columns:
@@ -168,7 +168,7 @@ if __name__ == '__main__':
         logging.shutdown()
         sys.exit(d.EX_CONFIG)
     sheet_table_df = {}
-    for sheet in itemized_costs_df['worksheet name']:
+    for sheet in itemized_costs_df['worksheet']:
         sheet_table_df[sheet] = f.checkWorksheet(wb, sheet, 'itemized_costs', ['hospital_code', 'run_code', 'feeder_code'])
         # Now check that the episode numbers are valid
         for row in sheet_table_df[sheet].itertuples(index=False):
@@ -258,9 +258,9 @@ if __name__ == '__main__':
     f.addTableData(general_ledger_table_df, 'general_ledger_costs')
 
     # Add the itemized costs
-    for index, row in itemized_costs_df.iterrows():
-        sheet = row['worksheet name']
-        feeder_code = row['feeder_code']
+    for row in itemized_costs_df.itertuples():
+        sheet = row.worksheet
+        feeder_code = row.feeder_code
         table_df = sheet_table_df[sheet]
 
         # Prepend the hospital_code, run code and feeder_code

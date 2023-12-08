@@ -126,16 +126,12 @@ class feeders(Base):
     hospital_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
     feeder_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
     feeder_type_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
-    new_department_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
-    new_cost_type_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
     event_class_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
     event_class_seq:Mapped[float] = mapped_column(Float, nullable=True)
     feeder_description:Mapped[str] = mapped_column(String(60), nullable=True)
     __table_args__ = (
         ForeignKeyConstraint(['hospital_code'], ['hospitals.hospital_code']),
         ForeignKeyConstraint(['hospital_code', 'feeder_type_code'], ['feeder_types.hospital_code', 'feeder_types.feeder_type_code']),
-        ForeignKeyConstraint(['hospital_code', 'new_department_code'], ['departments.hospital_code', 'departments.department_code']),
-        ForeignKeyConstraint(['hospital_code', 'new_cost_type_code'], ['cost_types.hospital_code', 'cost_types.cost_type_code']),
     )
 
 
@@ -437,17 +433,6 @@ class general_ledger_run_adjustments(Base):
         ForeignKeyConstraint(['hospital_code', 'to_cost_type_code'], ['cost_types.hospital_code', 'cost_types.cost_type_code']),
     )
 
-
-# The Clinical Costing modelling configuration tables
-class models(Base):
-    '''
-    The code and name of each Clinical Costing model
-    (Can be used for more than one hospital)
-    '''
-    __tablename__ = 'models'
-    model_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
-    model_description:Mapped[str] = mapped_column(String(60), nullable=True)
-
 class general_ledger_adjusted(Base):
     """
     The general_ledger_costs
@@ -466,6 +451,34 @@ class general_ledger_adjusted(Base):
         ForeignKeyConstraint(['model_code'], ['models.model_code']),
         ForeignKeyConstraint(['hospital_code', 'department_code'], ['departments.hospital_code', 'departments.department_code']),
         ForeignKeyConstraint(['hospital_code', 'cost_type_code'], ['cost_types.hospital_code', 'cost_types.cost_type_code']),
+    )
+
+# The Clinical Costing modelling configuration tables
+class models(Base):
+    '''
+    The code and name of each Clinical Costing model
+    (Can be used for more than one hospital)
+    '''
+    __tablename__ = 'models'
+    model_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    model_description:Mapped[str] = mapped_column(String(60), nullable=True)
+
+class feeder_model(Base):
+    '''
+    The modelling for cost based feeder data
+    '''
+    __tablename__ = 'feeder_model'
+    hospital_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    model_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    feeder_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    new_department_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    new_cost_type_code:Mapped[str] = mapped_column(String(12), primary_key=True, autoincrement=False)
+    __table_args__ = (
+        ForeignKeyConstraint(['hospital_code'], ['hospitals.hospital_code']),
+        ForeignKeyConstraint(['model_code'], ['models.model_code']),
+        ForeignKeyConstraint(['hospital_code', 'feeder_code'], ['feeders.hospital_code', 'feeders.feeder_code']),
+        ForeignKeyConstraint(['hospital_code', 'new_department_code'], ['departments.hospital_code', 'departments.department_code']),
+        ForeignKeyConstraint(['hospital_code', 'new_cost_type_code'], ['cost_types.hospital_code', 'cost_types.cost_type_code']),
     )
 
 class mapping_types(Base):
