@@ -201,7 +201,10 @@ if __name__ == '__main__':
                 sys.exit(d.EX_CONFIG)
 
     # Check the 'general ledger run adjustments' worksheet
-    adjustments_df = f.checkWorksheet(wb, 'general ledger run adjustments', 'general_ledger_run_adjustments', ['hospital_code', 'run_code'])
+    costAdjustments_df = f.checkWorksheet(wb, 'general ledger run adjustments', 'general_ledger_run_adjustments', ['hospital_code', 'run_code'])
+
+    # Check the 'general ledger run adjustments' worksheet
+    attributeAdjustments_df = f.checkWorksheet(wb, 'gl attributes run adjustments', 'gl_attributes_run_adjustments', ['hospital_code', 'run_code'])
 
     # Check if this is a run_code exists
     runs_df = pd.read_sql_query(text('SELECT run_code FROM clinical_costing_runs'), d.engine.connect())
@@ -247,6 +250,7 @@ if __name__ == '__main__':
             session.execute(delete(d.metadata.tables['general_ledger_costs']).where(text(where)))
             session.execute(delete(d.metadata.tables['itemized_costs']).where(text(where)))
             session.execute(delete(d.metadata.tables['general_ledger_run_adjustments']).where(text(where)))
+            session.execute(delete(d.metadata.tables['gl_attributes_run_adjustments']).where(text(where)))
             session.commit()
             logging.debug('general_ledger_costs, itemized_costs and event charges cleared')
 
@@ -273,8 +277,16 @@ if __name__ == '__main__':
 
     # Add any general ledger run adjustments
     # Prepend the hospital_code and run code
-    adjustments_df.insert(0,'hospital_code', d.hospital_code)
-    adjustments_df.insert(1,'run_code', d.run_code)
+    costAdjustments_df.insert(0,'hospital_code', d.hospital_code)
+    costAdjustments_df.insert(1,'run_code', d.run_code)
 
     # Append the data to the general_ledger_run_adjustments table
-    f.addTableData(adjustments_df, 'general_ledger_run_adjustments')
+    f.addTableData(costAdjustments_df, 'general_ledger_run_adjustments')
+
+    # Add any general ledger attribute run adjustments
+    # Prepend the hospital_code and run code
+    attributeAdjustments_df.insert(0,'hospital_code', d.hospital_code)
+    attributeAdjustments_df.insert(1,'run_code', d.run_code)
+
+    # Append the data to the general_ledger_run_adjustments table
+    f.addTableData(attributeAdjustments_df, 'gl_attributes_run_adjustments')

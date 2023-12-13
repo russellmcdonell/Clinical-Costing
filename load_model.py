@@ -199,7 +199,6 @@ if __name__ == '__main__':
     # Now use the hospital's feeder configuration data
     # to add codes to event_class_codes, event_attribute_code, distribution_codes and event_codes
     feeders_df = pd.read_sql_query(text('SELECT * FROM feeders WHERE hospital_code = "' + d.hospital_code + '"'), d.engine.connect())
-    feeders_df = feeders_df[feeders_df['feeder_type_code'] == 'C']
     event_class_codes_df = feeders_df[['hospital_code', 'event_class_code', 'event_class_seq', 'feeder_description']]
     event_class_codes_df = event_class_codes_df.rename(columns={'feeder_description': 'event_class_description'})
     event_class_codes_df.insert(1, 'model_code', d.model_code)

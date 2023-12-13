@@ -164,7 +164,7 @@ if __name__ == '__main__':
     selectText = 'SELECT * FROM general_ledger_costs WHERE ' + whereRun
     glCosts_df = pd.read_sql_query(text(selectText), d.engine.connect())
     glCosts_df.insert(2, 'model_code', d.model_code)
-    print(f"general_ledger_costs: ${glCosts_df['cost'].sum()}")
+    print(f"general_ledger_costs: ${glCosts_df['cost'].sum():.2f}")
 
     # Then adjust for any cost based feeder costs
     selectText = 'SELECT * FROM feeders WHERE ' + whereHospital
@@ -194,8 +194,9 @@ if __name__ == '__main__':
         glCosts_df = f.moveCosts(department_code, cost_type_code, amount, new_department_code, new_cost_type_code, 'A', glCosts_df)
 
     # Save the adjusted costs
+    glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
     glCosts_df.to_sql('general_ledger_adjusted', d.engine, if_exists='append', index=False)
-    print(f"general_ledger_adjusted: ${glCosts_df['cost'].sum()}")
+    print(f"general_ledger_adjusted: ${glCosts_df['cost'].sum():.2f}")
 
     # Then do any General Ledger Run Adjustments
     selectText = 'SELECT * FROM general_ledger_run_adjustments WHERE ' + whereRun
@@ -209,10 +210,11 @@ if __name__ == '__main__':
     glCosts_df = f.generalLedgerAdjustOrMap(generalLedgerMapping_df, glCosts_df)
 
     # Save the mapped costs
+    glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
     glCosts_df.to_sql('general_ledger_mapped', d.engine, if_exists='append', index=False)
-    print(f"general_ledger_mapped: ${glCosts_df['cost'].sum()}")
+    print(f"general_ledger_mapped: ${glCosts_df['cost'].sum():.2f}")
 
-    # Next do any General Ledger Grouping
+    # Next do any General Ledger Grouping - starting with department grouping
     selectText = 'SELECT * FROM department_grouping WHERE ' + whereModel
     departmentGrouping_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for groupingRow in departmentGrouping_df.itertuples():
@@ -227,11 +229,29 @@ if __name__ == '__main__':
             amount = glTmpRow.cost
             glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
 
+    # Then cost type with in department grouping
+    preservedCostTypes = set()
+    selectText = 'SELECT * FROM department_cost_type_grouping WHERE ' + whereModel
+    departmentCostTypeGrouping_df = pd.read_sql_query(text(selectText), d.engine.connect())
+    for groupingRow in departmentCostTypeGrouping_df.itertuples():
+        from_department_code = groupingRow.department_code
+        to_department_code = from_department_code
+        from_cost_type_code = groupingRow.from_cost_type_code
+        to_cost_type_code = groupingRow.to_cost_type_code
+        preservedCostTypes.add(to_cost_type_code)
+        fromCosts_df = glCosts_df[(glCosts_df['department_code'] == from_department_code) & (glCosts_df['cost_type_code'] == from_cost_type_code)]
+        if len(fromCosts_df.index) == 0:        # None of this cost in the General Ledger
+            continue
+        amount = fromCosts_df['cost'].item()
+        glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
+
+    # Then simplify the cost types with cost type grouping
     selectText = 'SELECT * FROM cost_type_grouping WHERE ' + whereModel
     costTypeGrouping_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for groupingRow in costTypeGrouping_df.itertuples():
         from_cost_type_code = groupingRow.from_cost_type_code
         to_cost_type_code = groupingRow.to_cost_type_code
+        preservedCostTypes.add(to_cost_type_code)
         glCostsTmp_df = glCosts_df[glCosts_df['cost_type_code'] == from_cost_type_code].copy()
         if len(glCostsTmp_df.index) == 0:
             continue        # No costs of this cost type in the General Ledger
@@ -241,19 +261,17 @@ if __name__ == '__main__':
             amount = glTmpRow.cost
             glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
 
-    selectText = 'SELECT * FROM department_cost_type_grouping WHERE ' + whereModel
-    departmentCostTypeGrouping_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for groupingRow in departmentCostTypeGrouping_df.itertuples():
-        from_department_code = groupingRow.department_code
-        to_deparment_code = from_department_code
-        from_cost_type_code = groupingRow.from_cost_type_code
-        to_cost_type_code = groupingRow.to_cost_type_code
-        fromCosts_df = glCosts_df[(glCosts_df['department_code'] == from_department_code) & (glCosts_df['cost_type_code'] == from_cost_type_code)]
-        if len(fromCosts_df.index) == 0:        # None of this cost in the General Ledger
-            continue
-        amount = fromCosts_df['cost'].item()
-        glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
+    # Finally, group all other cost types into 'other'
+    glCostsTmp_df = glCosts_df[~glCosts_df['cost_type_code'].isin(preservedCostTypes)].copy()
+    if len(glCostsTmp_df.index) != 0:
+        for glTmpRow in glCostsTmp_df.itertuples():
+            from_department_code = glTmpRow.department_code
+            to_department_code = from_department_code
+            from_cost_type_code = glTmpRow.cost_type_code
+            amount = glTmpRow.cost
+            glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, 'other', 'A', glCosts_df)
 
     # Save the built costs
+    glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
     glCosts_df.to_sql('general_ledger_built', d.engine, if_exists='append', index=False)
-    print(f"general_ledger_built: ${glCosts_df['cost'].sum()}")
+    print(f"general_ledger_built: ${glCosts_df['cost'].sum():.2f}")

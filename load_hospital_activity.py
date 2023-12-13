@@ -76,17 +76,20 @@ import data as d
 
 
 # Define the required worksheets and associated database tables
-requiredSheets = {
-    'Inpat episode details': 'inpat_episode_details',
-    'Inpat admissions': 'inpat_admissions',
-    'Inpat discharges': 'inpat_discharges',
-    'Inpat patient location': 'inpat_patient_location',
-    'Inpat theatre details': 'inpat_theatre_details',
-    'Clinic activity details': 'clinic_activity_details',
-    'ED episode details': 'ed_episode_details',
-    'ED admissions': 'ed_admissions',
-    'ED discharges': 'ed_discharges'
-}
+requiredSheets = [
+    {
+        'Inpat episode details': 'inpat_episode_details',
+        'Clinic activity details': 'clinic_activity_details',
+        'ED episode details': 'ed_episode_details',
+    }, {
+        'Inpat admissions': 'inpat_admissions',
+        'Inpat discharges': 'inpat_discharges',
+        'Inpat patient location': 'inpat_patient_location',
+        'Inpat theatre details': 'inpat_theatre_details',
+        'ED admissions': 'ed_admissions',
+        'ED discharges': 'ed_discharges'
+    }
+]
 
 
 if __name__ == '__main__':
@@ -194,25 +197,23 @@ if __name__ == '__main__':
     # Create the general "where" clause
     where = 'hospital_code = "' + d.hospital_code + '" AND run_code = "' + d.run_code + '"'
 
-    # Check that the required configuration data worksheets
-    sheet_table_df = {}
-    for sheet, table in requiredSheets.items():
-        sheet_table_df[sheet] = f.checkWorksheet(wb, sheet, table, ['hospital_code', 'run_code'])
-
     # Check if we are replacing an old run
     if not newRun:
         with d.Session() as session:
-            for sheet, table in reversed(requiredSheets.items()):
-                session.execute(delete(d.metadata.tables[table]).where(text(where)))
+            for theseSheets in reversed(requiredSheets):
+                for sheet, table in theseSheets.items():
+                    session.execute(delete(d.metadata.tables[table]).where(text(where)))
             session.commit()
 
     # Add the patient activity data to the database tables
-    for sheet, table in requiredSheets.items():
-        table_df = sheet_table_df[sheet]
+    for theseSheets in requiredSheets:
+        for sheet, table in theseSheets.items():
+            # Check that the required configuration data worksheets
+            table_df = f.checkWorksheet(wb, sheet, table, ['hospital_code', 'run_code'])
 
-        # Prepend the hospital_code and run code
-        table_df.insert(0,'hospital_code', d.hospital_code)
-        table_df.insert(1,'run_code', d.run_code)
+            # Prepend the hospital_code and run code
+            table_df.insert(0,'hospital_code', d.hospital_code)
+            table_df.insert(1,'run_code', d.run_code)
 
-        # Append the data to the itemized_costs table
-        f.addTableData(table_df, table)
+            # Append the data to the itemized_costs table
+            f.addTableData(table_df, table)

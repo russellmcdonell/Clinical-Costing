@@ -227,20 +227,36 @@ def checkWorksheet(wb, sheet, table, toBeAdded):
     cols = next(data)
     table_df = pd.DataFrame(list(data), columns=cols)
     for foreign_key in d.metadata.tables[table].foreign_key_constraints:
-        if len(foreign_key.elements) != 2:
-            continue
-        if foreign_key.column_keys[1] in toBeAdded:
+        codeColumn = foreign_key.column_keys[-1]
+        if codeColumn in toBeAdded:
             continue
         # Get all the referred to codesets
         refered_table = foreign_key.referred_table
         if refered_table not in d.codeTables:     # A new codeset, add it to the dictionary of codesets
-            selected = pd.read_sql_query(text(f'SELECT {foreign_key.elements[1].target_fullname} FROM {refered_table}'), d.engine.connect())
-            codes = selected.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
+            selectText = f'SELECT {foreign_key.elements[-1].target_fullname} FROM {foreign_key.referred_table}'
+            where = ''
+            for column_key in foreign_key.column_keys:
+                if column_key == 'hospital_code':
+                    if where != '':
+                        where += ' AND '
+                    where += f'hospital_code = "{d.hospital_code}"'
+                if column_key == 'run_code':
+                    if where != '':
+                        where += ' AND '
+                    where += f'run_code = "{d.run_code}"'
+                if column_key == 'model_code':
+                    if where != '':
+                        where += ' AND '
+                    where += f'model_code = "{d.model_code}"'
+            if where != '':
+                selectText += ' WHERE ' + where
+            selected = pd.read_sql_query(text(selectText), d.engine.connect())
+            codes = selected.values.tolist()      # convert rows/columns to a list of lists (will be [[code]] )
             d.codeTables[refered_table] = set()
             for codeRow in codes:
                 d.codeTables[refered_table].add(codeRow[0])
         # Check every foreign key value to make sure that it is in the matching codeset
-        for code in table_df[foreign_key.column_keys[1]]:
+        for code in table_df[codeColumn]:
             if code not in d.codeTables[refered_table]:
                 logging.critical('Code "%s" in worksheet "%s" is not in database code table "%s"', code, sheet, refered_table)
                 logging.critical('table codes(%s)', d.codeTables[refered_table])
@@ -301,8 +317,10 @@ def addTableData(dfTable, thisTable):
                 continue
             param = getattr(row, colName)
             if type(param) not in [int, float, str, decimal.Decimal]:
-                param = str(param)
-            print(param, type(param))
+                if param is None:
+                    param = ''
+                else:
+                    param = str(param)
             params[colName] = param
         with d.Session() as session:
             if (len(results) > 0):      # A row exists
@@ -347,5 +365,5 @@ def generalLedgerAdjustOrMap(adjustMap_df, costs_df):
         thisAmount = thisRow.amount
         thisToDeptCode = thisRow.to_department_code
         thisToCostType = thisRow.to_cost_type_code
-        moveCosts(thisFromDeptCode, thisFromCostType, thisAmount, thisToDeptCode, thisToCostType, thisMappingCode, costs_df)
+        costs_df = moveCosts(thisFromDeptCode, thisFromCostType, thisAmount, thisToDeptCode, thisToCostType, thisMappingCode, costs_df)
     return costs_df
