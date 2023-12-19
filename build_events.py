@@ -56,7 +56,7 @@ The build_events script builds events from non-cost based feeders and Patient Ac
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile
     The name of a log file where you want all messages captured.
@@ -168,12 +168,15 @@ if __name__ == '__main__':
         session.execute(delete(d.metadata.tables['events']).where(text(where)))
         session.commit()
 
-    # Build the events from the non-cost based feeder data
-    selectText = 'SELECT feeder_code FROM feeders WHERE ' + whereHospital + ' AND feeder_type_code != "C"'
+    # Build the events from the feeder data
+    # With cost based feeders the costs from the associated account won't be distributed over these events
+    # (the costs will be subracted from the accounts and the remainder distributed over some other event),
+    # but other accounts can be distributed over these events.
+    selectText = 'SELECT feeder_code FROM feeders WHERE ' + whereHospital
     feeders_df = pd.read_sql_query(text(selectText), d.engine.connect())
     selectText = f'SELECT hospital_code, run_code, "{d.model_code}" as model_code, feeder_code as event_code, '
     selectText += 'feeder_code as event_attribute_code, service_code, episode_no, invoice_line_no as event_seq, '
-    selectText += 'invoice_no as event_what, feeder_code as distribution_code, 1.0 as event_weight '
+    selectText += 'invoice_no as event_what, feeder_code as distribution_code, amount as event_weight '
     selectText += 'FROM itemized_costs WHERE ' + bf.SQLwhereRun
     for row in feeders_df.itertuples():
         feeder_code = row.feeder_code
@@ -223,3 +226,6 @@ if __name__ == '__main__':
         eventBase = row.event_attribute_base
         eventWeight = row.event_attribute_weight
         bf.buildEvent(eventSubroutine, eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight)
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)

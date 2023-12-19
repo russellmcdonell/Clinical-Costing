@@ -917,7 +917,7 @@ class events(Base):
     service_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
     episode_no:Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     event_seq:Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    event_what:Mapped[str] = mapped_column(String(100), nullable=False)
+    event_what:Mapped[str] = mapped_column(String(100), primary_key=True, autoincrement=False)
     distribution_code:Mapped[str] = mapped_column(String(20), nullable=False)
     event_weight:Mapped[float] = mapped_column(Numeric(15,5), nullable=True)
     __table_args__ = (

@@ -250,3 +250,5 @@ if __name__ == '__main__':
         sys.exit(EX_UNAVAILABLE)
 
     print('All tables have been created')
+    logging.shutdown()
+    sys.exit(EX_OK)

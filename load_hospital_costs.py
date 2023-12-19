@@ -51,7 +51,7 @@ NOTE: The hospital activity must be loaded before the hospital costs, as itemize
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile
     The name of a log file where you want all messages captured.
@@ -290,3 +290,6 @@ if __name__ == '__main__':
 
     # Append the data to the general_ledger_run_adjustments table
     f.addTableData(attributeAdjustments_df, 'gl_attributes_run_adjustments')
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)

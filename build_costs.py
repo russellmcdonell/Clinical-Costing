@@ -53,7 +53,7 @@ simplifies the general_ledger_costs by mapping, grouping and folding.
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile
     The name of a log file where you want all messages captured.
@@ -172,6 +172,7 @@ if __name__ == '__main__':
     selectText = 'SELECT * FROM feeder_model WHERE ' + whereModel
     feederAccounts_df = pd.read_sql_query(text(selectText), d.engine.connect())
     feederAccounts = {}
+    preservedCostTypes = set()
     for row in feederAccounts_df.itertuples():
         feeder_code = row.feeder_code
         feederAccounts[feeder_code] = {}
@@ -183,14 +184,16 @@ if __name__ == '__main__':
     items_df = items_df.groupby(['feeder_code', 'department_code', 'cost_type_code']).sum('amount')
     for groupTuple in items_df.index:
         feeder_code, department_code, cost_type_code = groupTuple
-        if feeder_code not in feederAccounts:           # Some feeders are not in this model
-            continue
         # Check that this is a cost based feeder
         if feeders_df[(feeders_df['feeder_code'] == feeder_code)]['feeder_type_code'].item() != 'C':
+            continue
+        if feeder_code not in feederAccounts:           # Some feeders are not in this model
+            logging.warning('No feeder account defined for feeder(%s) in model(%s)', feeder_code, d.model_code)
             continue
         amount = items_df.loc[groupTuple]['amount']
         new_department_code = feederAccounts[feeder_code]['new_department_code']
         new_cost_type_code = feederAccounts[feeder_code]['new_cost_type_code']
+        preservedCostTypes.add(new_cost_type_code)
         glCosts_df = f.moveCosts(department_code, cost_type_code, amount, new_department_code, new_cost_type_code, 'A', glCosts_df)
 
     # Save the adjusted costs
@@ -201,13 +204,13 @@ if __name__ == '__main__':
     # Then do any General Ledger Run Adjustments
     selectText = 'SELECT * FROM general_ledger_run_adjustments WHERE ' + whereRun
     glAdjust_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    glCosts_df = f.generalLedgerAdjustOrMap(glAdjust_df, glCosts_df)
+    glCosts_df, preservedCostTypes = f.generalLedgerAdjustOrMap(glAdjust_df, glCosts_df, preservedCostTypes)
 
     # Then do any General Gedger Mappings
     selectText = 'SELECT * FROM general_ledger_mapping WHERE ' + whereModel
     generalLedgerMapping_df = pd.read_sql_query(text(selectText), d.engine.connect())
     generalLedgerMapping_df.sort_values(by='mapping_order', inplace=True, ascending=True)
-    glCosts_df = f.generalLedgerAdjustOrMap(generalLedgerMapping_df, glCosts_df)
+    glCosts_df, preservedCostTypes = f.generalLedgerAdjustOrMap(generalLedgerMapping_df, glCosts_df, preservedCostTypes)
 
     # Save the mapped costs
     glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
@@ -222,6 +225,7 @@ if __name__ == '__main__':
         to_department_code = groupingRow.to_department_code
         glCostsTmp_df = glCosts_df[glCosts_df['department_code'] == from_department_code].copy()
         if len(glCostsTmp_df.index) == 0:
+            logging.warning('No costs in general_ledger_mapped for department_code(%s)', from_department_code)
             continue            # No costs for this department in the General Ledger
         for glTmpRow in glCostsTmp_df.itertuples():
             from_cost_type_code = glTmpRow.cost_type_code
@@ -230,7 +234,6 @@ if __name__ == '__main__':
             glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
 
     # Then cost type with in department grouping
-    preservedCostTypes = set()
     selectText = 'SELECT * FROM department_cost_type_grouping WHERE ' + whereModel
     departmentCostTypeGrouping_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for groupingRow in departmentCostTypeGrouping_df.itertuples():
@@ -241,6 +244,7 @@ if __name__ == '__main__':
         preservedCostTypes.add(to_cost_type_code)
         fromCosts_df = glCosts_df[(glCosts_df['department_code'] == from_department_code) & (glCosts_df['cost_type_code'] == from_cost_type_code)]
         if len(fromCosts_df.index) == 0:        # None of this cost in the General Ledger
+            logging.warning('No costs in general_ledger_mapped for account[department_code(%s), cost_type_code(%s)]', from_department_code, from_cost_type_code)
             continue
         amount = fromCosts_df['cost'].item()
         glCosts_df = f.moveCosts(from_department_code, from_cost_type_code, amount, to_department_code, to_cost_type_code, 'A', glCosts_df)
@@ -254,6 +258,7 @@ if __name__ == '__main__':
         preservedCostTypes.add(to_cost_type_code)
         glCostsTmp_df = glCosts_df[glCosts_df['cost_type_code'] == from_cost_type_code].copy()
         if len(glCostsTmp_df.index) == 0:
+            logging.warning('No costs in general_ledger_mapped for cost_type_code(%s)', from_cost_type_code)
             continue        # No costs of this cost type in the General Ledger
         for glTmpRow in glCostsTmp_df.itertuples():
             from_department_code = glTmpRow.department_code
@@ -275,3 +280,6 @@ if __name__ == '__main__':
     glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
     glCosts_df.to_sql('general_ledger_built', d.engine, if_exists='append', index=False)
     print(f"general_ledger_built: ${glCosts_df['cost'].sum():.2f}")
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)

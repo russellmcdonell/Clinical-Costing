@@ -56,7 +56,7 @@ The disburse script disburses cost from indirect general_ledger accounts.
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile
     The name of a log file where you want all messages captured.
@@ -183,7 +183,7 @@ if __name__ == '__main__':
         else:
             attribute_weight = glTotalCosts_df[glTotalCosts_df['department_code'] == department_code]['cost'].item()
         attributes_df.loc[(attributes_df['department_code'] == department_code) &
-                      (attributes_df['cost_type_code'] == cost_type_code) & 
+                      (attributes_df['cost_type_code'] == cost_type_code) &
                       (attributes_df['general_ledger_attribute_code'] == attribute_code), ['general_ledger_attribute_weight']] = attribute_weight
 
     # Next apply any gl_attributes_run_adjustments
@@ -199,15 +199,15 @@ if __name__ == '__main__':
             logging.warning('general_ledger_attribute_code(%s) in run adjustments is not in model(%s)', attribute_code, d.run_code)
             continue
         attribute_weight = row.general_ledger_attribute_weight
-        thisAttribute_df = attributes_df.loc[(attributes_df['department_code'] == department_code) & 
-                                             (attributes_df['cost_type_code'] == cost_type_code) & 
+        thisAttribute_df = attributes_df.loc[(attributes_df['department_code'] == department_code) &
+                                             (attributes_df['cost_type_code'] == cost_type_code) &
                                              (attributes_df['general_ledger_attribute_code'] == attribute_code)].copy()
         if len(thisAttribute_df.index) == 0:
+            logging.warning('No account[department_code(%s), cost_type_code(%s)] with attribute_code(%s) in general_ledger_attributes', department_code, cost_type_code, attribute_code)
             continue
         attributes_df.loc[(attributes_df['department_code'] == department_code) &
-                      (attributes_df['cost_type_code'] == cost_type_code) & 
+                      (attributes_df['cost_type_code'] == cost_type_code) &
                       (attributes_df['general_ledger_attribute_code'] == attribute_code), ['general_ledger_attribute_weight']] = attribute_weight
-
 
     # Then read in the General Ledger Disbursement
     selectText = 'SELECT * FROM general_ledger_disbursement WHERE ' + whereModel
@@ -239,6 +239,7 @@ if __name__ == '__main__':
             for deptCode, ctypeCode, attributeCode in levels[level]:
                 indCost = glCosts_df[((glCosts_df['department_code'] == deptCode) & (glCosts_df['cost_type_code'] == ctypeCode))]
                 if len(indCost.index) == 0:
+                    logging.warning('No account[department_code(%s), cost_type_code(%s)] in general_ledger_built', department_code, cost_type_code)
                     continue
                 thisIndCost = indCost['cost'].item()
                 targetAccounts_df = attributes_df[attributes_df['general_ledger_attribute_code'] == attributeCode]
@@ -292,6 +293,9 @@ if __name__ == '__main__':
         print(f'Remaining indirect costs (after cascading): ${indCosts:.2f}')
 
     # Save the disbursed costs
-    glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
+    glCosts_df = glCosts_df[glCosts_df['cost'].abs() > 0.1]
     glCosts_df.to_sql('general_ledger_disbursed', d.engine, if_exists='append', index=False)
     print(f"general_ledger_disbursed: ${glCosts_df['cost'].sum():.2f}")
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)

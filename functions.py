@@ -33,7 +33,7 @@ def addCommonArguments(parser):
     parser.add_argument('-p', '--password', dest='password', help='The user password required to access the database')
     parser.add_argument('-d', '--databaseName', dest='databaseName', help='The name of the database')
     parser.add_argument ('-v', '--verbose', dest='verbose', type=int, choices=range(0,5), help='The level of logging\n\t0=CRITICAL,1=ERROR,2=WARNING,3=INFO,4=DEBUG')
-    parser.add_argument ('-L', '--logDir', dest='logDir', metavar='logDir', help='The name of the directory where the logging file will be created')
+    parser.add_argument ('-L', '--logDir', dest='logDir', default='.', metavar='logDir', help='The name of the directory where the logging file will be created')
     parser.add_argument ('-l', '--logFile', dest='logFile', metavar='logfile', help='The name of a logging file')
     return
 
@@ -354,7 +354,7 @@ def moveCosts(fromDeptCode, fromCostType, toAmount, toDeptCode, toCostType, mapp
         dfCosts.loc[(dfCosts.department_code == fromDeptCode) & (dfCosts.cost_type_code == fromCostType), 'cost'] -= toAmount
     return dfCosts
 
-def generalLedgerAdjustOrMap(adjustMap_df, costs_df):
+def generalLedgerAdjustOrMap(adjustMap_df, costs_df, preservedCostTypes):
     '''
     Execute any adjustments or mappings
     '''
@@ -365,5 +365,6 @@ def generalLedgerAdjustOrMap(adjustMap_df, costs_df):
         thisAmount = thisRow.amount
         thisToDeptCode = thisRow.to_department_code
         thisToCostType = thisRow.to_cost_type_code
+        preservedCostTypes.add(thisToCostType)
         costs_df = moveCosts(thisFromDeptCode, thisFromCostType, thisAmount, thisToDeptCode, thisToCostType, thisMappingCode, costs_df)
-    return costs_df
+    return costs_df, preservedCostTypes

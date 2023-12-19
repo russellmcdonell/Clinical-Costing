@@ -41,6 +41,7 @@ def baseParams(code, attribute, what):
     params['event_seq'] = 1
     params['event_what'] = what
     params['distribution_code'] = code
+    params['event_weight'] = 1.0
     return params
 
 def checkDistributionCode(distributionCode, eventCode, eventAttribute, unit):
@@ -174,83 +175,195 @@ def opclinicmin(code, attribute, what, where, base, weight):
     '''
     params = baseParams(code, attribute, what)
     params['service_code'] = 'Clinic'
-    selectText = 'SELECT episode_no, attend_min, clinic_code, acuity FROM clinic_activity_details WHERE ' + SQLwhereRun
-    if (where is not None) and (where != ''):
-        selectText += ' AND ' + where
-    events_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for row in events_df.itertuples():
-        params['episode_no'] = row.episode_no
-        params['distribution_code'] = row.clinic_code
-        if row.clinic_code not in d.codeTables['distribution_codes']:
-            logging.critical('distribution code(%s) not in distribution_codes(%s)', row.clinic_code, d.codeTables['distribution_codes'])
-            logging.shutdown()
-            sys.exit(d.EX_CONFIG)
-        thisWeight = (base + row.attend_min * row.acuity) * weight
-        params['event_weight'] = thisWeight
-        with d.Session() as session:
-            session.execute(insert(d.metadata.tables['events']).values(params))
-            session.commit()
+    if code.startswith('clinic'):
+        selectText = 'SELECT episode_no, attend_min, clinic_code, acuity FROM clinic_activity_details WHERE ' + SQLwhereRun
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            clinicCode = row.clinic_code
+            distributionCode = clinicCode + code[6:]
+            params['distribution_code'] = distributionCode
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            thisWeight = (base + row.attend_min * row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+    else:
+        selectText = 'SELECT episode_no, sum(attend_min * acuity) as eventWeight FROM clinic_activity_details WHERE ' + SQLwhereRun
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        selectText += ' GROUP BY episode_no'
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            distributionCode = code
+            params['distribution_code'] = distributionCode
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            thisWeight = (base + row.eventWeight) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
 
 def ipadmissions(code, attribute, what, where, base, weight):
     '''
     Build events based on admissions to an inpatient ward
     '''
-    if code not in d.codeTables['distribution_codes']:
-        logging.critical('distribution code(%s) not in distribution_codes(%s)', code, d.codeTables['distribution_codes'])
-        logging.shutdown()
-        sys.exit(d.EX_CONFIG)
     params = baseParams(code, attribute, what)
-    selectText = 'SELECT episode_no FROM inpat_admissions WHERE ' + SQLwhereRun
-    events_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for row in events_df.itertuples():
-        params['episode_no'] = row.episode_no
-        with d.Session() as session:
-            session.execute(insert(d.metadata.tables['events']).values(params))
-            session.commit()
+    if code.startswith('ward'):
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_episode_details.admitting_ward_code as ward_code,'
+        selectText += ' inpat_episode_details.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_admissions WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_admissions.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_admissions.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_admissions.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            wardCode = row.ward_code
+            distributionCode = wardCode + code[4:]
+            checkDistributionCode(distributionCode, code, attribute, wardCode)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+    else:
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_episode_details.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_admissions WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_admissions.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_admissions.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_admissions.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            distributionCode = code
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
 
 def ipdischarges(code, attribute, what, where, base, weight):
     '''
     Build events based on inpatient discharges
     '''
-    if code not in d.codeTables['distribution_codes']:
-        logging.critical('distribution code(%s) not in distribution_codes(%s)', code, d.codeTables['distribution_codes'])
-        logging.shutdown()
-        sys.exit(d.EX_CONFIG)
     params = baseParams(code, attribute, what)
-    selectText = 'SELECT episode_no FROM inpat_discharges WHERE ' + SQLwhereRun
-    events_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for row in events_df.itertuples():
-        params['episode_no'] = row.episode_no
-        with d.Session() as session:
-            session.execute(insert(d.metadata.tables['events']).values(params))
-            session.commit()
+    if code.startswith('ward'):
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_episode_details.discharge_ward_code as ward_code,'
+        selectText += ' inpat_episode_details.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_discharges WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_discharges.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_discharges.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_discharges.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            wardCode = row.ward_code
+            distributionCode = wardCode + code[4:]
+            checkDistributionCode(distributionCode, code, attribute, wardCode)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+    else:
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_episode_details.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_discharges WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_discharges.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_discharges.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_discharges.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            distributionCode = code
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
 
 def ipwardbdays(code, attribute, what, where, base, weight):
     '''
     Build events based on days in an inpatient ward
     '''
     params = baseParams(code, attribute, what)
-    selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_patient_location.location_seq as event_seq, inpat_patient_location.ward_code as ward_code,'
-    selectText += ' inpat_patient_location.ward_days as ward_days, inpat_patient_location.acuity as acuity'
-    selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
-    selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
-    selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
-    selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
-    if (where is not None) and (where != ''):
-        selectText += ' AND ' + where
-    events_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for row in events_df.itertuples():
-        params['episode_no'] = row.episode_no
-        params['event_seq'] = row.event_seq
-        wardCode = row.ward_code
-        distributionCode = wardCode + code
-        checkDistributionCode(distributionCode, code, attribute, wardCode)
-        params['distribution_code'] = distributionCode
-        thisWeight = (base + row.ward_days * row.acuity) * weight
-        params['event_weight'] = thisWeight
-        with d.Session() as session:
-            session.execute(insert(d.metadata.tables['events']).values(params))
-            session.commit()
+    if code.startswith('ward'):
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_patient_location.location_seq as event_seq, inpat_patient_location.ward_code as ward_code,'
+        selectText += ' inpat_patient_location.ward_days as ward_days, inpat_patient_location.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            params['event_seq'] = row.event_seq
+            wardCode = row.ward_code
+            distributionCode = wardCode + code[4:]
+            checkDistributionCode(distributionCode, code, attribute, wardCode)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.ward_days * row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+    else:
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no,'
+        selectText += ' sum(inpat_patient_location.ward_days * inpat_patient_location.acuity) as eventWeight'
+        selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        selectText += ' GROUP BY inpat_episode_details.episode_no'
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            distributionCode = code
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.eventWeight) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+
 
 def ipwardsday(code, attribute, what, where, base, weight):
     '''
@@ -265,8 +378,15 @@ def ipwardsday(code, attribute, what, where, base, weight):
     for row in events_df.itertuples():
         params['episode_no'] = row.episode_no
         wardCode = row.admitting_ward_code
-        distributionCode = wardCode + code
-        checkDistributionCode(distributionCode, code, attribute, wardCode)
+        if code.startswith('ward'):
+            distributionCode = wardCode + code[4:]
+            checkDistributionCode(distributionCode, code, attribute, wardCode)
+        else:
+            distributionCode = code
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
         params['distribution_code'] = distributionCode
         thisWeight = (base + row.acuity) * weight
         params['event_weight'] = thisWeight
@@ -279,27 +399,52 @@ def ipwardbhrs(code, attribute, what, where, base, weight):
     Build events based hours in an inpatient ward
     '''
     params = baseParams(code, attribute, what)
-    selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_patient_location.location_seq as event_seq, inpat_patient_location.ward_code as ward_code,'
-    selectText += ' inpat_patient_location.ward_hours as ward_hours, inpat_patient_location.acuity as acuity'
-    selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
-    selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
-    selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
-    selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
-    if (where is not None) and (where != ''):
-        selectText += ' AND ' + where
-    events_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    for row in events_df.itertuples():
-        params['episode_no'] = row.episode_no
-        params['event_seq'] = row.event_seq
-        wardCode = row.ward_code
-        distributionCode = wardCode + code
-        checkDistributionCode(distributionCode, code, attribute, wardCode)
-        params['distribution_code'] = distributionCode
-        thisWeight = (base + row.ward_hours * row.acuity) * weight
-        params['event_weight'] = thisWeight
-        with d.Session() as session:
-            session.execute(insert(d.metadata.tables['events']).values(params))
-            session.commit()
+    if code.startswith('ward'):
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no, inpat_patient_location.location_seq as event_seq, inpat_patient_location.ward_code as ward_code,'
+        selectText += ' inpat_patient_location.ward_hours as ward_hours, inpat_patient_location.acuity as acuity'
+        selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            params['event_seq'] = row.event_seq
+            wardCode = row.ward_code
+            distributionCode = wardCode + code[4:]
+            checkDistributionCode(distributionCode, code, attribute, wardCode)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.ward_hours * row.acuity) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
+    else:
+        selectText = 'SELECT inpat_episode_details.episode_no as episode_no,'
+        selectText += ' sum(inpat_patient_location.ward_hours * inpat_patient_location.acuity) as eventWeight'
+        selectText += ' FROM inpat_episode_details, inpat_patient_location WHERE'
+        selectText += f' inpat_episode_details.hospital_code = "{d.hospital_code}" AND inpat_patient_location.hospital_code = "{d.hospital_code}"'
+        selectText += f' AND inpat_episode_details.run_code = "{d.run_code}" AND inpat_patient_location.run_code = "{d.run_code}"'
+        selectText += ' AND inpat_episode_details.episode_no =  inpat_patient_location.episode_no'
+        if (where is not None) and (where != ''):
+            selectText += ' AND ' + where
+        selectText += ' GROUP BY inpat_episode_details.episode_no'
+        events_df = pd.read_sql_query(text(selectText), d.engine.connect())
+        for row in events_df.itertuples():
+            params['episode_no'] = row.episode_no
+            distributionCode = code
+            if distributionCode not in d.codeTables['distribution_codes']:
+                logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            params['distribution_code'] = distributionCode
+            thisWeight = (base + row.eventWeight) * weight
+            params['event_weight'] = thisWeight
+            with d.Session() as session:
+                session.execute(insert(d.metadata.tables['events']).values(params))
+                session.commit()
 
 def anaesthmin(code, attribute, what, where, base, weight):
     '''

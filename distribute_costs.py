@@ -56,7 +56,7 @@ The distribute_costs script distributes cost from direct general_ledger accounts
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile
     The name of a log file where you want all messages captured.
@@ -71,6 +71,7 @@ Then disburse the distributed costs data.
 # pylint: disable=invalid-name, bare-except, pointless-string-statement, unspecified-encoding
 
 import sys
+import os
 import argparse
 import logging
 import pandas as pd
@@ -166,26 +167,34 @@ if __name__ == '__main__':
     # Delete any old data
     with d.Session() as session:
         session.execute(delete(d.metadata.tables['event_costs']).where(text(where)))
+        session.execute(delete(d.metadata.tables['general_ledger_undistributed']).where(text(where)))
         session.commit()
 
-    # Create the event_cost records from the invoice data
+    # Start by reading in the General Ledger 'as disbursed' costs, ready for distribution.
+    selectText = 'SELECT * FROM general_ledger_disbursed WHERE ' + where
+    glCosts_df = pd.read_sql_query(text(selectText), d.engine.connect())
+    print(f"general_ledger_disbursed: ${glCosts_df['cost'].sum():.2f}")
+
+    # Then create the event_cost records from the invoice data
+    # And clear down the associated General Ledger Accounts
     # Process each cost based feeder
     selectText = 'SELECT feeder_code FROM feeders WHERE ' + whereHospital + ' AND feeder_type_code = "C"'
     feeders_df = pd.read_sql_query(text(selectText), d.engine.connect())
+    selectText = 'SELECT * FROM feeder_model WHERE ' + whereModel
+    feederAccounts_df = pd.read_sql_query(text(selectText), d.engine.connect())
     selectText = f'SELECT hospital_code, run_code, "{d.model_code}" as model_code, feeder_code as event_code, '
     selectText += 'feeder_code as event_attribute_code, service_code, episode_no, invoice_line_no as event_seq, '
     selectText += 'department_code, cost_type_code, invoice_no as event_what, feeder_code as distribution_code, amount as cost '
     selectText += 'FROM itemized_costs WHERE ' + bf.SQLwhereRun
     for row in feeders_df.itertuples():
-        feeder_code = row.feeder_code
-        thisSelectText = selectText + f' AND feeder_code = "{feeder_code}"'
+        feederCode = row.feeder_code
+        thisSelectText = selectText + f' AND feeder_code = "{feederCode}"'
         eventCosts_df = pd.read_sql_query(text(thisSelectText), d.engine.connect())
         eventCosts_df.to_sql('event_costs', d.engine, if_exists='append', index=False)
-
-    # Next read in the General Ledger 'as disbursed' costs, ready for distribution.
-    selectText = 'SELECT * FROM general_ledger_disbursed WHERE ' + where
-    glCosts_df = pd.read_sql_query(text(selectText), d.engine.connect())
-    print(f"general_ledger_disbursed: ${glCosts_df['cost'].sum():.2f}")
+        newAccounts_df = feederAccounts_df[feederAccounts_df['feeder_code'] == feederCode]
+        newDepartmentCode = newAccounts_df['new_department_code'].item()
+        newCostTypeCode = newAccounts_df['new_cost_type_code'].item()
+        glCosts_df.loc[(glCosts_df['department_code'] == newDepartmentCode) & (glCosts_df['cost_type_code'] == newCostTypeCode), 'cost'] = 0.0
 
     # Next read in the general_ledger_distribution which tells how to distribute those costs
     selectText = 'SELECT * FROM general_ledger_distribution WHERE ' + whereModel
@@ -200,40 +209,62 @@ if __name__ == '__main__':
     params['hospital_code'] = d.hospital_code
     params['run_code'] = d.run_code
     params['model_code'] = d.model_code
-    for row in distribution_df.itertuples():
-        department_code = row.department_code
-        cost_type_code = row.cost_type_code
-        account_df = glCosts_df[(glCosts_df['department_code'] == department_code) & (glCosts_df['cost_type_code'] == cost_type_code)]
+    groupedDistribution_df = distribution_df.groupby(['department_code', 'cost_type_code'])
+    for groupTuple, group_df in groupedDistribution_df:
+        departmentCode, costTypeCode = groupTuple
+        account_df = glCosts_df[(glCosts_df['department_code'] == departmentCode) & (glCosts_df['cost_type_code'] == costTypeCode)]
         if len(account_df.index) == 0:
-            logging.warning('No account [department_code(%s), cost_type_code(%s)] in general_ledger_disbursed', department_code, cost_type_code)
+            logging.warning('No account [department_code(%s), cost_type_code(%s)] in general_ledger_disbursed', departmentCode, costTypeCode)
             continue
-        distribution_code = row.distribution_code
-        theseEvents_df = events_df[events_df['distribution_code'] == distribution_code]
-        if len(theseEvents_df.index) == 0:
-            logging.warning('No events for distribution_code(%s)', distribution_code)
-            continue
-        # Get the total weight and distribute this cost over this weight
         originalCost = account_df['cost'].item()
-        params['department_code'] = department_code
-        params['cost_type_code'] = cost_type_code
-        params['distribution_code'] = distribution_code
-        totalWeight = theseEvents_df['event_weight'].sum()
-        with d.Session() as session:
-            for eventRow in theseEvents_df.itertuples():
-                fraction = eventRow.event_weight / totalWeight
-                partCost = originalCost * fraction
-                params['event_code'] = eventRow.event_code
-                params['event_attribute_code'] = eventRow.event_attribute_code
-                params['service_code'] = eventRow.service_code
-                params['episode_no'] = eventRow.episode_no
-                params['event_seq'] = eventRow.event_seq
-                params['event_what'] = eventRow.event_what
-                params['cost'] = float(partCost)
-                session.execute(insert(d.metadata.tables['event_costs']).values(params))
-            session.commit()
-        glCosts_df.loc[(glCosts_df['department_code'] == department_code) & (glCosts_df['cost_type_code'] == cost_type_code), 'cost'] = 0.0
+        params['department_code'] = departmentCode
+        params['cost_type_code'] = costTypeCode
+        for row in group_df.itertuples():
+            distributionCode = row.distribution_code
+            distributionFraction = row.distribution_fraction
+            rowCost = originalCost * distributionFraction
+            theseEvents_df = events_df[events_df['distribution_code'] == distributionCode]
+            if len(theseEvents_df.index) == 0:
+                logging.warning('No events for distribution_code(%s) for department(%s)/cost type(%s)',
+                                distributionCode, departmentCode, costTypeCode)
+                continue
+            # Get the total weight and distribute this cost over this weight
+            params['distribution_code'] = distributionCode
+            totalWeight = theseEvents_df['event_weight'].sum()
+            if totalWeight is None:
+                logging.critical('No event weights for distribution code(%s) no in table "events"', distributionCode)
+                logging.shutdown()
+                sys.exit(d.EX_CONFIG)
+            with d.Session() as session:
+                for eventRow in theseEvents_df.itertuples():
+                    fraction = eventRow.event_weight / totalWeight
+                    partCost = rowCost * fraction
+                    params['event_code'] = eventRow.event_code
+                    params['event_attribute_code'] = eventRow.event_attribute_code
+                    params['service_code'] = eventRow.service_code
+                    params['episode_no'] = eventRow.episode_no
+                    params['event_seq'] = eventRow.event_seq
+                    params['event_what'] = eventRow.event_what
+                    params['cost'] = float(partCost)
+                    session.execute(insert(d.metadata.tables['event_costs']).values(params))
+                session.commit()
+        glCosts_df.loc[(glCosts_df['department_code'] == departmentCode) & (glCosts_df['cost_type_code'] == costTypeCode), 'cost'] = 0.0
 
     # Save the undistributed costs
-    glCosts_df = glCosts_df[glCosts_df['cost'] != 0.0]
-    glCosts_df.to_sql('general_ledger_undistribute', d.engine, if_exists='append', index=False)
-    print(f"general_ledger_undistributed: ${glCosts_df['cost'].sum():.2f}")
+    glCosts_df = glCosts_df[glCosts_df['cost'].abs() > 0.1]
+    glCosts_df.to_sql('general_ledger_undistributed', d.engine, if_exists='append', index=False)
+    undistributedCosts = glCosts_df['cost'].sum()
+
+    # Report the distributed costs
+    selectText = 'SELECT sum(cost) as cost FROM event_costs WHERE ' + where
+    distributedCosts_df = pd.read_sql_query(text(selectText), d.engine.connect())
+    distributedCosts = distributedCosts_df['cost'].item()
+    print(f"general_ledger_distributed: ${distributedCosts:.2f}")
+
+    # And finally report an remaining undistributed costs
+    print(f"general_ledger_undistributed: ${undistributedCosts:.2f}")
+    # And save them as an Excel workbook
+    glCosts_df.to_excel(os.path.join(logDir, 'undistributed_costs.xlsx'), index=False)
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)

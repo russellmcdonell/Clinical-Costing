@@ -49,7 +49,7 @@ into the Clinical Costing tables, from an Excel workbook.
     Set the level of logging that you want.
 
     -O logDir|--logDir=logDir  
-    The directory where the log file will be created.
+    The directory where the log file will be created (default=".").
 
     -o logfile|--logfile=logfile  
     The name of a log file where you want all messages captured.
@@ -217,3 +217,6 @@ if __name__ == '__main__':
 
             # Append the data to the itemized_costs table
             f.addTableData(table_df, table)
+
+    logging.shutdown()
+    sys.exit(d.EX_OK)
