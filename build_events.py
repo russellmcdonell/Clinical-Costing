@@ -225,7 +225,8 @@ if __name__ == '__main__':
         eventWhere = row.event_where
         eventBase = row.event_attribute_base
         eventWeight = row.event_attribute_weight
-        bf.buildEvent(eventSubroutine, eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight)
+        eventAcuityScaling = row.event_acuity_scaling
+        bf.buildEvent(eventSubroutine, eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight, eventAcuityScaling)
 
     logging.shutdown()
     sys.exit(d.EX_OK)

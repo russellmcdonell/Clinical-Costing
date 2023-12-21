@@ -714,7 +714,7 @@ class event_subroutines(Base):
     __tablename__ = 'event_subroutines'
     hospital_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
     model_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
-    event_subroutine_name:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
+    event_subroutine_name:Mapped[str] = mapped_column(String(50), primary_key=True, autoincrement=False)
     event_subroutine_description:Mapped[str] = mapped_column(String(100), nullable=True)
     __table_args__ = (
         ForeignKeyConstraint(['hospital_code'], ['hospitals.hospital_code']),
@@ -732,11 +732,12 @@ class event_attributes(Base):
     model_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
     event_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
     event_attribute_code:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
-    event_subroutine_name:Mapped[str] = mapped_column(String(20), primary_key=True, autoincrement=False)
-    event_what:Mapped[str] = mapped_column(String(100), nullable=True)
-    event_where:Mapped[str] = mapped_column(String(1200), nullable=True)
-    event_attribute_base:Mapped[float] = mapped_column(Numeric(15,5), primary_key=True, autoincrement=False)
-    event_attribute_weight:Mapped[float] = mapped_column(Numeric(15,5), primary_key=True, autoincrement=False)
+    event_subroutine_name:Mapped[str] = mapped_column(String(30), primary_key=True, autoincrement=False)
+    event_where:Mapped[str] = mapped_column(String(600), primary_key=True, autoincrement=False)
+    event_what:Mapped[str] = mapped_column(String(80), nullable=True)
+    event_attribute_base:Mapped[float] = mapped_column(Numeric(15,5), nullable=False)
+    event_attribute_weight:Mapped[float] = mapped_column(Numeric(15,5), nullable=False)
+    event_acuity_scaling:Mapped[float] = mapped_column(Numeric(15,5), nullable=False)
     __table_args__ = (
         ForeignKeyConstraint(['hospital_code'], ['hospitals.hospital_code']),
         ForeignKeyConstraint(['model_code'], ['models.model_code']),
@@ -919,7 +920,7 @@ class events(Base):
     event_seq:Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     event_what:Mapped[str] = mapped_column(String(100), primary_key=True, autoincrement=False)
     distribution_code:Mapped[str] = mapped_column(String(20), nullable=False)
-    event_weight:Mapped[float] = mapped_column(Numeric(15,5), nullable=True)
+    event_weight:Mapped[float] = mapped_column(Numeric(15,5), nullable=False)
     __table_args__ = (
         Index(None, 'hospital_code', 'run_code', 'model_code', unique=False),
         ForeignKeyConstraint(['hospital_code'], ['hospitals.hospital_code']),

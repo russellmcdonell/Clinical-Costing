@@ -16,7 +16,7 @@ SQLwhereRun = None
 SQLwhereModel = None
 SQLwhereHospital = None
 
-def buildEvent(eventFunc, eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight):
+def buildEvent(eventFunc, eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight, eventAcuityScaling):
     '''
     Build an Event using the function "eventFunc"
     '''
@@ -24,7 +24,7 @@ def buildEvent(eventFunc, eventCode, eventAttribute, eventWhat, eventWhere, even
         logging.critical('Event function "%s" is not defined', eventFunc)
         logging.shutdown()
         sys.exit(d.EX_USAGE)
-    globals()[eventFunc](eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight)
+    globals()[eventFunc](eventCode, eventAttribute, eventWhat, eventWhere, eventBase, eventWeight, eventAcuityScaling)
 
 def baseParams(code, attribute, what):
     '''
@@ -67,7 +67,23 @@ def checkDistributionCode(distributionCode, eventCode, eventAttribute, unit):
     d.codeTables['distribution_codes'][distributionCode] = distributionDescription
     return
 
-def EDadmissions(code, attribute, what, where, base, weight):
+def adjustAcuity(thisAcuity, acuityScaling):
+    '''
+    Adjust acuity, based upon acuity scaling
+    '''
+    if acuityScaling >= 1.0:        # Increase the acuity
+        if thisAcuity < 1.0:            # By reducing the reduction
+            thisAcuity = 1.0 - (1.0 - thisAcuity) / acuityScaling
+        else:                           # By increasing the increase
+            thisAcuity *= acuityScaling
+    elif thisAcuity < 1.0:      # Reduce the acuity by increasing the reduction
+        thisAcuity = 1.0 - (1 - thisAcuity) * acuityScaling
+    else:                       # Reduce the acuity by reducing the increase
+        thisAcuity = 1.0 + (thisAcuity - 1.0) * acuityScaling
+    return thisAcuity
+
+
+def EDadmissions(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based admissions to the Accidenta and Emergency department
     '''
@@ -85,7 +101,7 @@ def EDadmissions(code, attribute, what, where, base, weight):
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def EDdischarges(code, attribute, what, where, base, weight):
+def EDdischarges(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on discharges from the Accident and Emergency department
     '''
@@ -103,7 +119,7 @@ def EDdischarges(code, attribute, what, where, base, weight):
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def EDattendmin(code, attribute, what, where, base, weight):
+def EDattendmin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes in the Accident and Emergency department
     '''
@@ -119,13 +135,14 @@ def EDattendmin(code, attribute, what, where, base, weight):
     events_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for row in events_df.itertuples():
         params['episode_no'] = row.episode_no
-        thisWeight = (base + row.attend_min * row.acuity) * weight
+        thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+        thisWeight = (base + row.attend_min * thisAcuity) * weight
         params['event_weight'] = thisWeight
         with d.Session() as session:
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def EDseenmin(code, attribute, what, where, base, weight):
+def EDseenmin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes seen by a nurse the Accident and Emergency department
     '''
@@ -141,13 +158,14 @@ def EDseenmin(code, attribute, what, where, base, weight):
     events_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for row in events_df.itertuples():
         params['episode_no'] = row.episode_no
-        thisWeight = (base + row.seen_min * row.acuity) * weight
+        thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+        thisWeight = (base + row.seen_min * thisAcuity) * weight
         params['event_weight'] = thisWeight
         with d.Session() as session:
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def EDtreatmin(code, attribute, what, where, base, weight):
+def EDtreatmin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes of treatment in the Accident and Emergency department
     '''
@@ -163,13 +181,14 @@ def EDtreatmin(code, attribute, what, where, base, weight):
     events_df = pd.read_sql_query(text(selectText), d.engine.connect())
     for row in events_df.itertuples():
         params['episode_no'] = row.episode_no
-        thisWeight = (base + row.treat_min * row.acuity) * weight
+        thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+        thisWeight = (base + row.treat_min * thisAcuity) * weight
         params['event_weight'] = thisWeight
         with d.Session() as session:
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def opclinicmin(code, attribute, what, where, base, weight):
+def opclinicmin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes in an outpatient clinic
     '''
@@ -189,7 +208,8 @@ def opclinicmin(code, attribute, what, where, base, weight):
                 logging.critical('distribution code(%s) not in distribution_codes(%s)', distributionCode, d.codeTables['distribution_codes'])
                 logging.shutdown()
                 sys.exit(d.EX_CONFIG)
-            thisWeight = (base + row.attend_min * row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + row.attend_min * thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
@@ -214,7 +234,7 @@ def opclinicmin(code, attribute, what, where, base, weight):
                 session.execute(insert(d.metadata.tables['events']).values(params))
                 session.commit()
 
-def ipadmissions(code, attribute, what, where, base, weight):
+def ipadmissions(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on admissions to an inpatient ward
     '''
@@ -235,7 +255,8 @@ def ipadmissions(code, attribute, what, where, base, weight):
             distributionCode = wardCode + code[4:]
             checkDistributionCode(distributionCode, code, attribute, wardCode)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
@@ -257,13 +278,14 @@ def ipadmissions(code, attribute, what, where, base, weight):
                 logging.shutdown()
                 sys.exit(d.EX_CONFIG)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
                 session.commit()
 
-def ipdischarges(code, attribute, what, where, base, weight):
+def ipdischarges(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on inpatient discharges
     '''
@@ -284,7 +306,8 @@ def ipdischarges(code, attribute, what, where, base, weight):
             distributionCode = wardCode + code[4:]
             checkDistributionCode(distributionCode, code, attribute, wardCode)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
@@ -306,13 +329,14 @@ def ipdischarges(code, attribute, what, where, base, weight):
                 logging.shutdown()
                 sys.exit(d.EX_CONFIG)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
                 session.commit()
 
-def ipwardbdays(code, attribute, what, where, base, weight):
+def ipwardbdays(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on days in an inpatient ward
     '''
@@ -334,7 +358,8 @@ def ipwardbdays(code, attribute, what, where, base, weight):
             distributionCode = wardCode + code[4:]
             checkDistributionCode(distributionCode, code, attribute, wardCode)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.ward_days * row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + row.ward_days * thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
@@ -365,7 +390,7 @@ def ipwardbdays(code, attribute, what, where, base, weight):
                 session.commit()
 
 
-def ipwardsday(code, attribute, what, where, base, weight):
+def ipwardsday(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on a same day attendance in an inpatient ward
     '''
@@ -388,13 +413,14 @@ def ipwardsday(code, attribute, what, where, base, weight):
                 logging.shutdown()
                 sys.exit(d.EX_CONFIG)
         params['distribution_code'] = distributionCode
-        thisWeight = (base + row.acuity) * weight
+        thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+        thisWeight = (base + thisAcuity) * weight
         params['event_weight'] = thisWeight
         with d.Session() as session:
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def ipwardbhrs(code, attribute, what, where, base, weight):
+def ipwardbhrs(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based hours in an inpatient ward
     '''
@@ -416,7 +442,8 @@ def ipwardbhrs(code, attribute, what, where, base, weight):
             distributionCode = wardCode + code[4:]
             checkDistributionCode(distributionCode, code, attribute, wardCode)
             params['distribution_code'] = distributionCode
-            thisWeight = (base + row.ward_hours * row.acuity) * weight
+            thisAcuity = adjustAcuity(row.acuity, acuityScaling)
+            thisWeight = (base + row.ward_hours * thisAcuity) * weight
             params['event_weight'] = thisWeight
             with d.Session() as session:
                 session.execute(insert(d.metadata.tables['events']).values(params))
@@ -446,7 +473,7 @@ def ipwardbhrs(code, attribute, what, where, base, weight):
                 session.execute(insert(d.metadata.tables['events']).values(params))
                 session.commit()
 
-def anaesthmin(code, attribute, what, where, base, weight):
+def anaesthmin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes of anaethesia
     '''
@@ -468,7 +495,7 @@ def anaesthmin(code, attribute, what, where, base, weight):
             session.execute(insert(d.metadata.tables['events']).values(params))
             session.commit()
 
-def theatremin(code, attribute, what, where, base, weight):
+def theatremin(code, attribute, what, where, base, weight, acuityScaling):
     '''
     Build events based on minutes in an operating theatre
     '''

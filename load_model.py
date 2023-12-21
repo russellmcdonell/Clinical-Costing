@@ -226,6 +226,10 @@ if __name__ == '__main__':
             table_df.insert(0,'hospital_code', d.hospital_code)
             table_df.insert(1,'model_code', d.model_code)
 
+            # Special case event_attributes, where event_where can be blank, but not null
+            if table == 'event_attributes':
+                table_df['event_what'].fillna('', inplace=True)
+
             # Add the data to the database
             f.addTableData(table_df, table)
 

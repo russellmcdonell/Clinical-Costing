@@ -302,9 +302,9 @@ def addTableData(dfTable, thisTable):
             if isinstance(value, int) or isinstance(value, float):
                 where += colName + ' = ' + str(value)
             elif isinstance(value, str):
-                where += colName + ' = "' + value + '"'
+                where += colName + ' = "' + value.replace('"', '\\"') + '"'
             else:
-                where += colName + ' = "' + str(value) + '"'
+                where += colName + ' = "' + str(value).replace('"', '\\"') + '"'
         with d.Session() as session:
             results = session.scalars(select(d.metadata.tables[thisTable]).where(text(where))).all()
         logging.debug("table(%s), where(%s), results(%s)", thisTable, where, results)
