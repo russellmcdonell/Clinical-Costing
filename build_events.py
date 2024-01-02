@@ -137,7 +137,7 @@ if __name__ == '__main__':
         sys.exit(d.EX_CONFIG)
 
     # Check that the model_code is valid
-    models_df = pd.read_sql_query(text('SELECT model_code FROM models'), d.engine.connect())
+    models_df = pd.read_sql_query(text(f'SELECT model_code FROM models WHERE hospital_code = "{d.hospital_code}"'), d.engine.connect())
     models = models_df.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
     if not [d.model_code] in models:
         logging.critical('model code (%s) no in table "models"', d.model_code)

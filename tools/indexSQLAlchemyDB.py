@@ -9,6 +9,7 @@ NOTE: The Clinical Costing system does not need this, but it will have a signifi
 SYNOPSIS
 $ python indexSQLAlchemyDB.py 
                          [-D databaseType|--databaseType=databaseType]
+                         [-C configDir|--configDir=configDir] [-c configFile|--configFile=configFile]
                          [-u username|--username=username] [-p password|--password=password]
                          [-s Server|--Server=Server] [-d databaseName|--databaseName=databaseName]
                          [-v loggingLevel|--verbose=logingLevel] [-L logDir|--logDir=logDir] [-l logfile|--logfile=logfile]
@@ -19,6 +20,13 @@ The type of database [eg:MSSQL/MySQL]
 
 
 OPTIONS
+-C configDir|--configDir=configDir
+The directory where the database connection configuration file can be found (default='databaseConfig')
+
+-c configFile|--configFile=configFile
+The database connection configuration file (default=clinical_costing.json) which has the default database values for each Database Type.
+These can be overwritten using command line options.
+
 -u userName|--userName=userName]
 The user name require to access the database
 
@@ -91,6 +99,10 @@ if __name__ == '__main__':
     # Define the command line options
     parser = argparse.ArgumentParser(prog=progName)
     parser.add_argument('-D', '--databaseType', dest='databaseType', required=True, help='The database Type [e.g.: MSSQL/MySQL]')
+    parser.add_argument('-C', '--configDir', dest='configDir', default='../databaseConfig',
+                        help='The name of the directory containing the database connection configuration file (default=config)')
+    parser.add_argument('-c', '--configFile', dest='configFile', default='clinical_costing.json',
+                        help='The name of the configuration file (default clinical_costing.json)')
     parser.add_argument('-u', '--username', dest='username', help='The user required to access the database')
     parser.add_argument('-p', '--password', dest='password', help='The user password required to access the database')
     parser.add_argument('-s', '--server', dest='server', help='The address of the database server')
@@ -104,6 +116,8 @@ if __name__ == '__main__':
     # Parse the command line options
     args = parser.parse_args()
     databaseType = args.databaseType
+    configDir = args.configDir
+    configFile = args.configFile
     username = args.username
     password = args.password
     server = args.server
@@ -146,8 +160,8 @@ if __name__ == '__main__':
     # Read in the configuration file - which must exist if required
     config = {}                 # The configuration data
     try:
-        with open('SQLAlchemyDB.json', 'rt', newline='') as configfile:
-            config = json.load(configfile, object_pairs_hook=collections.OrderedDict)
+        with open(os.path.join(configDir, configFile), 'rt', newline='', encoding='utf-8') as configSource:
+            config = json.load(configSource, object_pairs_hook=collections.OrderedDict)
     except IOError:
         logging.critical('configFile (SQLAlchemyDB.json) failed to load')
         logging.shutdown()

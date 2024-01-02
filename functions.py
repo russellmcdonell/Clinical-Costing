@@ -250,8 +250,8 @@ def checkWorksheet(wb, sheet, table, toBeAdded):
                     where += f'model_code = "{d.model_code}"'
             if where != '':
                 selectText += ' WHERE ' + where
-            selected = pd.read_sql_query(text(selectText), d.engine.connect())
-            codes = selected.values.tolist()      # convert rows/columns to a list of lists (will be [[code]] )
+            selected_df = pd.read_sql_query(text(selectText), d.engine.connect())
+            codes = selected_df.values.tolist()      # convert rows/columns to a list of lists (will be [[code]] )
             d.codeTables[refered_table] = set()
             for codeRow in codes:
                 d.codeTables[refered_table].add(codeRow[0])

@@ -1,0 +1,108 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Create Tables",
+            "type": "python",
+            "request": "launch",
+            "program": "createSQLAlchemyDB.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/tools",
+            "args": ["-D", "MySQL", "-p", "local-admin" ]
+        },
+        {
+            "name": "Load Hospital",
+            "type": "python",
+            "request": "launch",
+            "program": "load_hospital.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["-I", "hospitalConfig/hospitals", "-i", "hospital1.xlsx", "-D", "MySQL", "-p", "local-admin", "-v", "2" ]
+        },
+        {
+            "name": "Load Model",
+            "type": "python",
+            "request": "launch",
+            "program": "load_model.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["-I", "hospitalConfig/models", "-i", "model1.xlsx", "-D", "MySQL", "-p", "local-admin", "-v", "2" ]
+        },
+        {
+            "name": "Load Hospital Activity",
+            "type": "python",
+            "request": "launch",
+            "program": "load_hospital_activity.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["-I", "hospitalActivity/hospital1", "-i", "Jun97PatientActivity.xlsx", "-D", "MySQL", "-p", "local-admin", "-v", "2" ]
+        },
+        {
+            "name": "Load Hospital Costs",
+            "type": "python",
+            "request": "launch",
+            "program": "load_hospital_costs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["-I", "hospitalCosts/hospital1", "-i", "Jun97HospitalCostsAndAdjustments.xlsx", "-D", "MySQL", "-p", "local-admin", "-v", "2" ]
+        },
+        {
+            "name": "Build Costs",
+            "type": "python",
+            "request": "launch",
+            "program": "build_costs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-L", "logs", "-l", "build_costs.log", "-v", "2" ]
+        },
+        {
+            "name": "Disburse Costs - Cascade",
+            "type": "python",
+            "request": "launch",
+            "program": "disburse_costs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-L", "logs", "-l", "disburse_costs.log", "-v", "2" ]
+        },
+        {
+            "name": "Disburse Costs - Iterate",
+            "type": "python",
+            "request": "launch",
+            "program": "disburse_costs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-i", "-L", "logs", "-l", "disburse_costs.log", "-v", "2" ]
+        },
+        {
+            "name": "Build Events",
+            "type": "python",
+            "request": "launch",
+            "program": "build_events.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-L", "logs", "-l", "build_events.log", "-v", "2" ]
+        },
+        {
+            "name": "Distribute Costs",
+            "type": "python",
+            "request": "launch",
+            "program": "distribute_costs.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/.",
+            "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-L", "logs", "-l", "distribute_costs.log", "-v", "2" ]
+        }
+    ]
+}

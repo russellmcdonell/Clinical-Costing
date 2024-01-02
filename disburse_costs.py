@@ -74,7 +74,7 @@ import sys
 import argparse
 import logging
 import pandas as pd
-from sqlalchemy import text, delete
+from sqlalchemy import text, delete, update
 import functions as f
 import data as d
 
@@ -136,7 +136,7 @@ if __name__ == '__main__':
         sys.exit(d.EX_CONFIG)
 
     # Check that the model_code is valid
-    models_df = pd.read_sql_query(text('SELECT model_code FROM models'), d.engine.connect())
+    models_df = pd.read_sql_query(text(f'SELECT model_code FROM models WHERE hospital_code = "{d.hospital_code}"'), d.engine.connect())
     models = models_df.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
     if not [d.model_code] in models:
         logging.critical('model code (%s) no in table "models"', d.model_code)
@@ -178,6 +178,8 @@ if __name__ == '__main__':
         department_code = row.department_code
         cost_type_code = row.cost_type_code
         attribute_code = row.general_ledger_attribute_code
+        where = whereModel + ' AND department_code = "' + department_code + '" AND cost_type_code = "' + cost_type_code + '"'
+        where += ' AND general_ledger_attribute_code = "' + attribute_code + '"'
         if department_code not in departments:
             attribute_weight = 0.0
         else:
@@ -185,7 +187,42 @@ if __name__ == '__main__':
         attributes_df.loc[(attributes_df['department_code'] == department_code) &
                       (attributes_df['cost_type_code'] == cost_type_code) &
                       (attributes_df['general_ledger_attribute_code'] == attribute_code), ['general_ledger_attribute_weight']] = attribute_weight
+        params = {}
+        params['general_ledger_attribute_weight'] = attribute_weight
+        with d.Session() as session:
+            session.execute(update(d.metadata.tables['general_ledger_attributes']).values(params).where(text(where)))
+            session.commit()
 
+    # Next update any general ledger attributes which start with a cost types
+    selectText = 'SELECT cost_type_code FROM cost_types WHERE ' + whereHospital
+    costTypes_df = pd.read_sql_query(text(selectText), d.engine.connect())
+    costTypes = costTypes_df.values.tolist()      # convert rows/columns to a list of lists (will be [[cost_type]] )
+    d.codeTables['cost_types'] = set()
+    for costType in costTypes:
+        d.codeTables['cost_types'].add(costType[0])
+    for row in attributes_df.itertuples():
+        department_code = row.department_code
+        cost_type_code = row.cost_type_code
+        attribute_code = row.general_ledger_attribute_code
+        for costType in d.codeTables['cost_types']:
+            if attribute_code.startswith(costType):
+                # Get the general ledger cost that matches this attribute
+                attribute_weight_df = glCosts_df[(glCosts_df['department_code'] == department_code) &
+                                              (glCosts_df['cost_type_code'] == costType)]
+                if len(attribute_weight_df.index) == 0:
+                    continue
+                attribute_weight = attribute_weight_df['cost'].iloc[0]
+                attributes_df.loc[(attributes_df['department_code'] == department_code) &
+                              (attributes_df['cost_type_code'] == cost_type_code) &
+                              (attributes_df['general_ledger_attribute_code'] == attribute_code), ['general_ledger_attribute_weight']] = attribute_weight
+                where = whereModel + ' AND department_code = "' + department_code + '" AND cost_type_code = "' + cost_type_code + '"'
+                where += ' AND general_ledger_attribute_code = "' + attribute_code + '"'
+                params = {}
+                params['general_ledger_attribute_weight'] = float(attribute_weight)
+                with d.Session() as session:
+                    session.execute(update(d.metadata.tables['general_ledger_attributes']).values(params).where(text(where)))
+                    session.commit()
+        
     # Next apply any gl_attributes_run_adjustments
     selectText = 'SELECT * FROM gl_attributes_run_adjustments WHERE ' + whereRun
     adjustments_df = pd.read_sql_query(text(selectText), d.engine.connect())
@@ -253,17 +290,17 @@ if __name__ == '__main__':
                         if ((targetDept, targetCtypeCode)  in targetLevels) and (targetLevels[(targetDept, targetCtypeCode)] <= level):
                             continue
                     targetWeight = row.general_ledger_attribute_weight
-                    if targetWeight < 0:
-                        logging.critical('general_ledger_attribute_weights must not be negative:department_code(%s), cost_type_code(%s), general_ledger_attribute_weight(%s)',
-                                         targetDept, targetCtypeCode, targetWeight)
-                        logging.shutdown()
-                        sys.exit(d.EX_CONFIG)
                     targetAccounts.append((targetDept, targetCtypeCode, targetWeight))
                     totalWeight += targetWeight
                 if totalWeight == 0.0:
+                    logging.warning('Cannot disburse department(%s), cost type(%s) as totalWeight is zero', deptCode, ctypeCode)
                     continue    # Nothing to distribute to
                 for targetDept, targetCtypeCode, targetWeight in targetAccounts:
-                    thisFraction = targetWeight / totalWeight
+                    try:
+                        thisFraction = targetWeight / totalWeight
+                    except:
+                        logging.warning('Cannot disburse department(%s), cost type(%s) as totalWeight(%f) is too small', deptCode, ctypeCode, totalWeight)
+                        break             
                     thisCost = thisIndCost * thisFraction
                     glCosts_df = f.moveCosts(deptCode, ctypeCode, thisCost, targetDept, targetCtypeCode, 'A', glCosts_df)
 
@@ -277,7 +314,7 @@ if __name__ == '__main__':
             if len(indCost.index) > 0:
                 indCosts += indCost['cost'].item()
         if useIteration:
-            print(f'Remaining indirect costs (after iternation {iterationNo}): ${indCosts:.2f}')
+            print(f'Remaining indirect costs (after iteration {iterationNo}): ${indCosts:.2f}')
             iterationNo += 1
             if lastIndCosts is None:
                 lastIndCosts = indCosts

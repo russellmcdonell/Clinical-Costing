@@ -6,9 +6,9 @@ into the Clinical Costing tables, from an Excel workbook.
 
     SYNOPSIS
     $ python load_hospital.py
-        [-I inputDir|--inputDir=inputDir] [-i inputWorkbook|--inputWorkbook=inputWorkbook]
-        [-C configDir|--configDir=configDir] [-c configFile|--configFile=configFile]
         [-D DatabaseType|--DatabaseType=DatabaseType]
+        [-C configDir|--configDir=configDir] [-c configFile|--configFile=configFile]
+        [-I inputDir|--inputDir=inputDir] [-i inputWorkbook|--inputWorkbook=inputWorkbook]
         [-s server|--server=server]
         [-u username|--username=username] [-p password|--password=password]
         [-d databaseName|--databaseName=databaseName]
@@ -16,13 +16,12 @@ into the Clinical Costing tables, from an Excel workbook.
         [-L logDir|--logDir=logDir] [-l logfile|--logfile=logfile]
 <br/>
 
+    REQUIRED
+    -D databaseType|--databaseType=databaseType
+    The type of database [eg:MSSQL/MySQL]
+
+
     OPTIONS
-    -I inputDir|--inputDir=inputDir
-    The directory containing the Excel workbook containing the hospital configuration data to be loaded.
-
-    -i inputWorkbook|--inputWorkbook=inputWorkbook
-    The Excel workbook which contains the hospital configuration data to be loaded.
-
     -C configDir|--configDir=configDir
     The directory where the database connection configuration file can be found (default='databaseConfig')
 
@@ -30,8 +29,11 @@ into the Clinical Costing tables, from an Excel workbook.
     The database connection configuration file (default=clinical_costing.json) which has the default database values for each Database Type.
     These can be overwritten using command line options.
 
-    -D DatabaseType|--DatabaseType=DatabaseType
-    The type of database [choice:MSSQL/MySQL]
+    -I inputDir|--inputDir=inputDir
+    The directory containing the Excel workbook containing the hospital configuration data to be loaded.
+
+    -i inputWorkbook|--inputWorkbook=inputWorkbook
+    The Excel workbook which contains the hospital configuration data to be loaded.
 
     -s server|--server=server]
     The address of the database server

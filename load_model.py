@@ -167,20 +167,21 @@ if __name__ == '__main__':
         sys.exit(d.EX_DATAERR)
 
     # Check that the 'model' worksheet exits
-    table_df = f.checkWorksheet(wb, 'model', 'models', [])
+    table_df = f.checkWorksheet(wb, 'model', 'models', ['hospital_code'])
 
     # Get the model_code from the worksheet
     ws = wb['model']
     d.model_code = ws['A2'].value        # First (and only) model_code in the list
 
     # Check if this is a new model code, or upgraded configuration of an existing model
-    models_df = pd.read_sql_query(text('SELECT model_code FROM models'), d.engine.connect())
+    models_df = pd.read_sql_query(text(f'SELECT model_code FROM models WHERE hospital_code = "{d.hospital_code}"'), d.engine.connect())
     models = models_df.values.tolist()      # convert rows/columns to a list of lists (will be [[model_code]] )
     newModel = not [d.model_code] in models
 
     # If this is a new model, then add it to the table
     if newModel:
         table_df = table_df.truncate(after=0)       # We only want the first row
+        table_df.insert(0,'hospital_code', d.hospital_code)
         table_df.to_sql('models', d.engine, if_exists='append', index=False)
 
     # Add the first set of configuation data to the database
