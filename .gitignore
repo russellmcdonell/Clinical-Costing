@@ -1,8 +1,7 @@
+Acuity Scaling.xlsx
 *.ipynb
 *.pyc
 *.swp
 logs/*
 tmp/*
 backup/*
-mkdocs/site
-mkdocs/site/*

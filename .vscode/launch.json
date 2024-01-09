@@ -103,6 +103,16 @@
             "justMyCode": true,
             "cwd": "${workspaceFolder}/.",
             "args": ["hospital1", "model1", "Jun-97", "-D", "MySQL", "-p", "local-admin", "-L", "logs", "-l", "distribute_costs.log", "-v", "2" ]
+        },
+        {
+            "name": "Create Views",
+            "type": "python",
+            "request": "launch",
+            "program": "createSQLAlchemyDBviews.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}/tools",
+            "args": ["-D", "MySQL", "-p", "local-admin" ]
         }
     ]
 }

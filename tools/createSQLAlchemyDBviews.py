@@ -3,19 +3,18 @@
 # pylint: disable=unspecified-encoding, broad-exception-caught, line-too-long, invalid-name, pointless-string-statement
 
 '''
-Script createSQLAlchemyDB.py
+Script createSQLAlchemyDBviews.py
 
-A python script to create the Clinical Costing database tables using SQLAlchemy definitions
+A python script to create views on the Clinical Costing database tables using SQLAlchemy
 
     SYNOPSIS
 
-    $ python createSQLAlchemyDB.py 
+    $ python createSQLAlchemyDBviews.py 
              [-D databaseType|--databaseType=databaseType]
              [-C configDir|--configDir=configDir]
              [-c configFile|--configFile=configFile]
              [-s Server|--Server=Server]
              [-d databaseName|--databaseName=databaseName]
-             [-N|--noKeys]
              [-v loggingLevel|--verbose=logingLevel]
              [-L logDir|--logDir=logDir]
              [-l logfile|--logfile=logfile]
@@ -47,9 +46,6 @@ A python script to create the Clinical Costing database tables using SQLAlchemy 
     -d databaseName|--databaseName=databaseName]
     The name of the database
 
-    -N|--noKeys
-    Create the tables with no primary keys and no foreign keys
-
     -v loggingLevel|--verbose=loggingLevel
     Set the level of logging that you want (defaut INFO).
 
@@ -61,7 +57,7 @@ A python script to create the Clinical Costing database tables using SQLAlchemy 
     (default=None)
 
     THE MAIN CODE
-    Create the tables in a database, that matches the Clinical Costing schema
+    Create the views in a database, based upon the Clinical Costing schema
 '''
 
 # Import all the modules that make life easy
@@ -71,8 +67,10 @@ import argparse
 import logging
 import collections
 import json
-from sqlalchemy import create_engine, MetaData, Table, Column
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import create_engine, MetaData, select, inspect, event, and_
+from sqlalchemy.ext import compiler
+from sqlalchemy.schema import DDLElement
+from sqlalchemy.sql import table
 from sqlalchemy_utils import database_exists
 import defineSQLAlchemyDB as dbConfig
 
@@ -97,6 +95,55 @@ EX_NOPERM = 77        # permission denied
 EX_CONFIG = 78        # configuration error
 
 
+class CreateView(DDLElement):
+    def __init__(self, name, selectable):
+        self.name = name
+        self.selectable = selectable
+
+
+class DropView(DDLElement):
+    def __init__(self, name):
+        self.name = name
+
+
+@compiler.compiles(CreateView)
+def _create_view(element, compiler, **kw):
+    return "CREATE VIEW %s AS %s" % (
+        element.name,
+        compiler.sql_compiler.process(element.selectable, literal_binds=True),
+    )
+
+
+@compiler.compiles(DropView)
+def _drop_view(element, compiler, **kw):
+    return "DROP VIEW %s" % (element.name)
+
+
+def view_exists(ddl, target, connection, **kw):
+    return ddl.name in inspect(connection).get_view_names()
+
+
+def view_doesnt_exist(ddl, target, connection, **kw):
+    return not view_exists(ddl, target, connection, **kw)
+
+
+def view(name, metadata, selectable):
+    t = table(name)
+
+    t._columns._populate_separate_keys(
+        col._make_proxy(t) for col in selectable.selected_columns
+    )
+
+    event.listen(
+        metadata,
+        "after_create",
+        CreateView(name, selectable).execute_if(callable_=view_doesnt_exist),
+    )
+    event.listen(
+        metadata, "before_drop", DropView(name).execute_if(callable_=view_exists)
+    )
+    return t
+
 
 
 # The main code
@@ -120,7 +167,6 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--password', dest='password', help='The user password required to access the database')
     parser.add_argument('-s', '--server', dest='server', help='The address of the database server')
     parser.add_argument('-d', '--databaseName', dest='databaseName', help='The name of the database')
-    parser.add_argument('-N', '--noKeys', dest='noKeys', action='store_true', help='Create the tables with no primary/foreign keys')
     parser.add_argument('-v', '--verbose', dest='verbose', type=int, choices=list(range(0, 5)),
                         help='The level of logging\n\t0=CRITICAL,1=ERROR,2=WARNING,3=INFO,4=DEBUG')
     parser.add_argument('-L', '--logDir', dest='logDir', default='.', help='The name of a logging directory')
@@ -136,7 +182,6 @@ if __name__ == '__main__':
     password = args.password
     server = args.server
     databaseName = args.databaseName
-    noKeys = args.noKeys
     logDir = args.logDir
     logFile = args.logFile
     loggingLevel = args.verbose
@@ -243,39 +288,74 @@ if __name__ == '__main__':
         logging.critical('Connection error for database %s', databaseName)
         logging.shutdown()
         sys.exit(EX_UNAVAILABLE)
+    conn.close()
 
-    convention = {
-        "ix": "ix_%(column_0_N_label)s",
-        "uq": "uq_%(table_name)s_%(column_0_N_name)s",
-        "ck": "ck_%(table_name)s_%(constraint_name)s",
-        "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
-        "pk": "pk_%(table_name)s",
-    }
+    # Now get the metadata
+    metaData = dbConfig.Base.metadata
 
-    # If noKeys then remove indexes and foreign key contraints
-    if noKeys:
-        newMetaData = MetaData(naming_convention=convention)
-        for thisTable in dbConfig.Base.metadata.tables:
-            newTable = Table(thisTable, newMetaData)
-            for column in dbConfig.Base.metadata.tables[thisTable].columns:
-                newName = column.name
-                newType = column.type
-                if column.primary_key:
-                    newTable.append_column(Column(newName, newType, nullable=False))
-                else:
-                    newTable.append_column(Column(newName, newType))
-    else:
-        newMetaData = dbConfig.Base.metadata
-        newMetaData.naming_convention = convention
+    # Define the views
+    # the .label() is to suit SQLite which needs explicit label names
+    # to be given when creating the view
+    # See http://www.sqlite.org/c3ref/column_name.html
+    inpatDRGcots = view(
+        "inpatDRGcosts",
+        metaData,
+        select(
+            metaData.tables['inpat_episode_details'].c.drg.label("drg"),
+            metaData.tables['inpat_episode_details'].c.hospital_code.label("hospital_code"),
+            metaData.tables['event_costs'].c.model_code.label("model_code"),
+            metaData.tables['inpat_episode_details'].c.run_code.label("run_code"),
+            metaData.tables['event_costs'].c.event_code.label("event_code"),
+            metaData.tables['event_costs'].c.event_attribute_code.label("event_attribute_code"),
+            metaData.tables['event_costs'].c.service_code.label("service_code"),
+            metaData.tables['inpat_episode_details'].c.episode_no.label("episode_no"),
+            metaData.tables['event_costs'].c.event_seq.label("event_seq"),
+            metaData.tables['event_costs'].c.department_code.label("department_code"),
+            metaData.tables['event_costs'].c.cost_type_code.label("cost_type_code"),
+            metaData.tables['event_costs'].c.event_what.label("event_what"),
+            metaData.tables['event_costs'].c.distribution_code.label("distribution_code"),
+            metaData.tables['event_costs'].c.cost.label("cost"),
+        )
+        .select_from(metaData.tables['inpat_episode_details'].join(metaData.tables['event_costs'], and_(metaData.tables['inpat_episode_details'].c.hospital_code == metaData.tables['event_costs'].c.hospital_code,
+                                                                  metaData.tables['inpat_episode_details'].c.run_code == metaData.tables['event_costs'].c.run_code,
+                                                                  metaData.tables['inpat_episode_details'].c.episode_no == metaData.tables['event_costs'].c.episode_no)))
+        .where(metaData.tables['event_costs'].c.service_code == "Inpat"),
+    )
 
-    # Create all the tables
+    inpatClinicalSpecialtyCosts = view(
+        "inpatClinicalSpecialtyCosts",
+        metaData,
+        select(
+            metaData.tables['inpat_episode_details'].c.clinical_specialty.label("clinical_specialty"),
+            metaData.tables['inpat_episode_details'].c.hospital_code.label("hospital_code"),
+            metaData.tables['event_costs'].c.model_code.label("model_code"),
+            metaData.tables['inpat_episode_details'].c.run_code.label("run_code"),
+            metaData.tables['event_costs'].c.event_code.label("event_code"),
+            metaData.tables['event_costs'].c.event_attribute_code.label("event_attribute_code"),
+            metaData.tables['event_costs'].c.service_code.label("service_code"),
+            metaData.tables['inpat_episode_details'].c.episode_no.label("episode_no"),
+            metaData.tables['event_costs'].c.event_seq.label("event_seq"),
+            metaData.tables['event_costs'].c.department_code.label("department_code"),
+            metaData.tables['event_costs'].c.cost_type_code.label("cost_type_code"),
+            metaData.tables['event_costs'].c.event_what.label("event_what"),
+            metaData.tables['event_costs'].c.distribution_code.label("distribution_code"),
+            metaData.tables['event_costs'].c.cost.label("cost"),
+        )
+        .select_from(metaData.tables['inpat_episode_details'].join(metaData.tables['event_costs'], and_(metaData.tables['inpat_episode_details'].c.hospital_code == metaData.tables['event_costs'].c.hospital_code,
+                                                                  metaData.tables['inpat_episode_details'].c.run_code == metaData.tables['event_costs'].c.run_code,
+                                                                  metaData.tables['inpat_episode_details'].c.episode_no == metaData.tables['event_costs'].c.episode_no)))
+        .where(metaData.tables['event_costs'].c.service_code == "Inpat"),
+    )
+
+    # Create all the views
     try:
-        newMetaData.create_all(engine, newMetaData.tables.values())
+        with engine.begin() as conn:
+            metaData.create_all(conn)
     except Exception as e:
         print('Exception:', e)
         logging.shutdown()
         sys.exit(EX_UNAVAILABLE)
 
-    print('All tables have been created')
+    print('All views have been created')
     logging.shutdown()
     sys.exit(EX_OK)

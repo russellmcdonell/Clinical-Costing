@@ -3,65 +3,50 @@
 # pylint: disable=unspecified-encoding, broad-exception-caught, line-too-long, invalid-name, pointless-string-statement
 
 '''
-Script createSQLAlchemyDB.py
+A python script to add primary keys, indexes and foreign key constraints to a Clinical Costing database
+NOTE: The Clinical Costing system does not need this, but it will have a significant effect on performance
 
-A python script to create the Clinical Costing database tables using SQLAlchemy definitions
+SYNOPSIS
+$ python indexSQLAlchemyDB.py 
+                         [-D databaseType|--databaseType=databaseType]
+                         [-C configDir|--configDir=configDir] [-c configFile|--configFile=configFile]
+                         [-u username|--username=username] [-p password|--password=password]
+                         [-s Server|--Server=Server] [-d databaseName|--databaseName=databaseName]
+                         [-v loggingLevel|--verbose=logingLevel] [-L logDir|--logDir=logDir] [-l logfile|--logfile=logfile]
 
-    SYNOPSIS
-
-    $ python createSQLAlchemyDB.py 
-             [-D databaseType|--databaseType=databaseType]
-             [-C configDir|--configDir=configDir]
-             [-c configFile|--configFile=configFile]
-             [-s Server|--Server=Server]
-             [-d databaseName|--databaseName=databaseName]
-             [-N|--noKeys]
-             [-v loggingLevel|--verbose=logingLevel]
-             [-L logDir|--logDir=logDir]
-             [-l logfile|--logfile=logfile]
-
-    REQUIRED
-    -D databaseType|--databaseType=databaseType
-    The type of database [eg:MSSQL/MySQL]
+REQUIRED
+-D databaseType|--databaseType=databaseType
+The type of database [eg:MSSQL/MySQL]
 
 
-    OPTIONS
-    -C configDir|--configDir=configDir
-    The directory containing the database connection configuration file
-    (default='databaseConfig')
+OPTIONS
+-C configDir|--configDir=configDir
+The directory where the database connection configuration file can be found (default='databaseConfig')
 
-    -c configFile|--configFile=configFile
-    The database connection configuration file (default=clinical_costing.json)
-    which has the default database values for each Database Type.
-    These can be overwritten using command line options.
+-c configFile|--configFile=configFile
+The database connection configuration file (default=clinical_costing.json) which has the default database values for each Database Type.
+These can be overwritten using command line options.
 
-    -u userName|--userName=userName]
-    The user name require to access the database
+-u userName|--userName=userName]
+The user name require to access the database
 
-    -p password|--password=password]
-    The password require to access the database
+-p password|--password=password]
+The password require to access the database
 
-    -s server|--server=server]
-    The address of the database server
+-s server|--server=server]
+The address of the database server
 
-    -d databaseName|--databaseName=databaseName]
-    The name of the database
+-d databaseName|--databaseName=databaseName]
+The name of the database
 
-    -N|--noKeys
-    Create the tables with no primary keys and no foreign keys
+-v loggingLevel|--verbose=loggingLevel
+Set the level of logging that you want (defaut INFO).
 
-    -v loggingLevel|--verbose=loggingLevel
-    Set the level of logging that you want (defaut INFO).
+-L logDir
+The directory where the log file will be written (default='.')
 
-    -L logDir
-    The directory where the log file will be written (default='.')
-
-    -l logfile|--logfile=logfile
-    The name of a logging file where you want all messages captured
-    (default=None)
-
-    THE MAIN CODE
-    Create the tables in a database, that matches the Clinical Costing schema
+-l logfile|--logfile=logfile
+The name of a logging file where you want all messages captured (default=None)
 '''
 
 # Import all the modules that make life easy
@@ -71,9 +56,11 @@ import argparse
 import logging
 import collections
 import json
-from sqlalchemy import create_engine, MetaData, Table, Column
+from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy_utils import database_exists
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 import defineSQLAlchemyDB as dbConfig
 
 # This next section is plagurised from /usr/include/sysexits.h
@@ -102,7 +89,7 @@ EX_CONFIG = 78        # configuration error
 # The main code
 if __name__ == '__main__':
     '''
-    Create the tables in a database, that matches the Clinical Costing schema
+    Index the tables in a Clinical Costing database
     '''
 
     # Get the script name (without the '.py' extension)
@@ -120,7 +107,6 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--password', dest='password', help='The user password required to access the database')
     parser.add_argument('-s', '--server', dest='server', help='The address of the database server')
     parser.add_argument('-d', '--databaseName', dest='databaseName', help='The name of the database')
-    parser.add_argument('-N', '--noKeys', dest='noKeys', action='store_true', help='Create the tables with no primary/foreign keys')
     parser.add_argument('-v', '--verbose', dest='verbose', type=int, choices=list(range(0, 5)),
                         help='The level of logging\n\t0=CRITICAL,1=ERROR,2=WARNING,3=INFO,4=DEBUG')
     parser.add_argument('-L', '--logDir', dest='logDir', default='.', help='The name of a logging directory')
@@ -129,14 +115,13 @@ if __name__ == '__main__':
 
     # Parse the command line options
     args = parser.parse_args()
+    databaseType = args.databaseType
     configDir = args.configDir
     configFile = args.configFile
-    databaseType = args.databaseType
     username = args.username
     password = args.password
     server = args.server
     databaseName = args.databaseName
-    noKeys = args.noKeys
     logDir = args.logDir
     logFile = args.logFile
     loggingLevel = args.verbose
@@ -178,7 +163,7 @@ if __name__ == '__main__':
         with open(os.path.join(configDir, configFile), 'rt', newline='', encoding='utf-8') as configSource:
             config = json.load(configSource, object_pairs_hook=collections.OrderedDict)
     except IOError:
-        logging.critical('configFile (clincial_costing.json) failed to load')
+        logging.critical('configFile (SQLAlchemyDB.json) failed to load')
         logging.shutdown()
         sys.exit(EX_CONFIG)
 
@@ -224,7 +209,7 @@ if __name__ == '__main__':
     if databaseType == 'MSSQL':
         engine = create_engine(connectionString, use_setinputsizes=False, echo=True)
     else:
-        engine = create_engine(connectionString, echo=True)
+        engine = create_engine(connectionString, echo=True, pool_pre_ping=True)
 
     # Check if the database exists
     if not database_exists(engine.url):
@@ -243,39 +228,30 @@ if __name__ == '__main__':
         logging.critical('Connection error for database %s', databaseName)
         logging.shutdown()
         sys.exit(EX_UNAVAILABLE)
+    conn.close()
+    # logging.getLogger('sqlalchemy.engine').setLevel(logging.DEBUG)
 
-    convention = {
-        "ix": "ix_%(column_0_N_label)s",
-        "uq": "uq_%(table_name)s_%(column_0_N_name)s",
-        "ck": "ck_%(table_name)s_%(constraint_name)s",
-        "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
-        "pk": "pk_%(table_name)s",
-    }
+    # Set up alembic
+    mc = MigrationContext.configure(engine.connect())
+    ops = Operations(mc)
 
-    # If noKeys then remove indexes and foreign key contraints
-    if noKeys:
-        newMetaData = MetaData(naming_convention=convention)
-        for thisTable in dbConfig.Base.metadata.tables:
-            newTable = Table(thisTable, newMetaData)
-            for column in dbConfig.Base.metadata.tables[thisTable].columns:
-                newName = column.name
-                newType = column.type
-                if column.primary_key:
-                    newTable.append_column(Column(newName, newType, nullable=False))
-                else:
-                    newTable.append_column(Column(newName, newType))
-    else:
-        newMetaData = dbConfig.Base.metadata
-        newMetaData.naming_convention = convention
+    # Create the primary key and any indexes on each table
+    for thisTable in dbConfig.Base.metadata.tables:
+        columns = []
+        for column in dbConfig.Base.metadata.tables[thisTable].columns:
+            if column.primary_key:
+                columns.append(column.name)
+        if len(columns) > 0:
+            ops.create_primary_key('PRIMARY', thisTable, columns)
 
-    # Create all the tables
-    try:
-        newMetaData.create_all(engine, newMetaData.tables.values())
-    except Exception as e:
-        print('Exception:', e)
-        logging.shutdown()
-        sys.exit(EX_UNAVAILABLE)
-
-    print('All tables have been created')
-    logging.shutdown()
-    sys.exit(EX_OK)
+    # Create the foreign key constraints on each table
+    for thisTable in dbConfig.Base.metadata.tables:
+        fkNo = 1
+        for column in dbConfig.Base.metadata.tables[thisTable].columns:
+            if column.foreign_keys:
+                ops.create_index(column.name, thisTable, [column.name])
+                fkName = f'{thisTable}_FK{fkNo}'
+                fkNo += 1
+                key = list(column.foreign_keys)[0]
+                bits = key.target_fullname.split('.')
+                ops.create_foreign_key(fkName, thisTable, bits[0], [column.name], [bits[1]])

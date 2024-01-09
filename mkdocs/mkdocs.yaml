@@ -1,0 +1,15 @@
+site_name: Clinical Costing
+
+theme:
+  name: "material"
+
+plugins:
+  - mkdocstrings
+
+nav:
+  - Welcome: index.md
+  - How-To Guide: how-to-guide.md
+  - theProcess.md
+  - theDatabase.md
+  - functions.md
+
